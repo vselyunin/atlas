@@ -59,3 +59,6 @@ requires explicit permission, including fixes suggested by a formatter.
 
 Use Conventional Commits such as `feat(board): add task creation` and validate a
 commit range with `pnpm check:commits -- <base-commit>`.
+
+Run `pnpm setup:hooks` once after cloning to enable the repository's commit-message
+hook. It checks messages without modifying source or tests.

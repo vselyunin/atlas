@@ -17,7 +17,8 @@
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
     "check:commits": "node scripts/check-commits.mjs",
     "test:integration": "vitest run tests/integration",
-    "test:e2e": "pnpm --filter @atlas/contracts build && playwright test"
+    "test:e2e": "pnpm --filter @atlas/contracts build && playwright test",
+    "setup:hooks": "git config core.hooksPath .githooks"
   },
   "devDependencies": {
     "@commitlint/cli": "^20.0.0",

@@ -133,4 +133,4 @@ Exact dependency versions, internal module structure, schema library, logging/te
 
 A fresh builder review identified two consequential setup questions: repository layout and operating environment. Both are now answered by the user: one repository with three applications and shared contracts, all running in WSL. User subsequently approved the design and repository conventions, explicitly removing mandatory TDD and requiring permission to modify existing tests.
 
-This document is saved in the current workspace. The workspace is not yet an initialized Git repository, so the design is not committed; initialize the agreed repository and commit the approved design during the authorized setup phase.
+The repository was initialized on `feat/atlas-mvp` during the approved implementation. The design and plans are tracked with the project.
