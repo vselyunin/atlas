@@ -1,0 +1,22 @@
+{
+  "name": "@atlas/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint . --max-warnings=0",
+    "typecheck": "node ../../scripts/run-package.mjs typecheck tsc --noEmit",
+    "test": "node ../../scripts/run-package.mjs test vitest run",
+    "build": "node ../../scripts/run-package.mjs build tsc -p tsconfig.build.json",
+    "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
+    "start": "node --env-file-if-exists=.env dist/main.js"
+  },
+  "dependencies": {
+    "@atlas/contracts": "workspace:*",
+    "ws": "^8.18.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.0"
+  }
+}
