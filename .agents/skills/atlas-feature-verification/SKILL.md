@@ -44,6 +44,20 @@ that work is not repeated. For optimistic UI changes, verify rejected actions
 restore the displayed state. Choose scenarios relevant to the change rather
 than adding a fixed checklist to every task.
 
+## Verify themed UI changes
+
+Follow `apps/board/AGENTS.md` for the theme-support policy. Inspect the affected
+workflow in light and dark modes, including open portal menus/dialogs, keyboard
+focus, hover, disabled controls and relevant loading/error/empty states. Check a
+narrow viewport and long labels as well as the desktop layout. Confirm new
+semantic color tokens have both palette values.
+
+When theme behavior changes, exercise System with live device preference changes,
+manual overrides, reload persistence and returning to System. Check that blocked
+browser storage does not prevent startup or in-session switching. Use the actual
+appearance control for acceptance; setting storage directly alone does not prove
+the user interaction works.
+
 ## Handle failures and report honestly
 
 Distinguish an application failure from unavailable browser libraries, occupied

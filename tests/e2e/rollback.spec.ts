@@ -22,7 +22,8 @@ test('a rejected move restores the card to its original column', async ({ page, 
   );
   expect(taskResponse.status()).toBe(201);
   await page.goto('/');
-  await page.getByLabel('Project', { exact: true }).selectOption(project.id);
+  await page.getByRole('button', { name: 'Project', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: 'Rollback checks', exact: true }).click();
   await page.getByRole('button', { name: 'Rollback example', exact: true }).click();
   await page.route('**/api/v1/tasks/*/move', async (route) => {
     await route.fulfill({

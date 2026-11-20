@@ -55,12 +55,14 @@ test('manage projects, versions, task fields, drag/drop and local repositories',
       .getByRole('region', { name: 'To do', exact: true })
       .getByRole('button', { name: 'Ship the board', exact: true }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Add version', exact: true }).click();
+  await page.getByRole('button', { name: 'Version', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Create version', exact: true }).click();
   await page.getByLabel('Version name').fill('v0.2');
   await page.getByRole('dialog').getByRole('button', { name: 'Add version', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Ship the board', exact: true })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Create project', exact: true }).click();
+  await page.getByRole('button', { name: 'Project', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Create project', exact: true }).click();
   await page.getByLabel('Project name').fill('Local repository');
   await page.getByRole('button', { name: /New local repository/ }).click();
   await page.getByLabel('Folder path').fill('local-example');
