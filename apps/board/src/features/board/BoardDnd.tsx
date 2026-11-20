@@ -75,7 +75,7 @@ function TaskCard({
             {worker?.kind === 'atlas' ? <Bot size={12} /> : <UserRound size={12} />}
           </span>
           <span>{worker?.name ?? 'Unassigned'}</span>
-          {worker?.availability === 'offline' && <span className="offline-dot" />}
+          {worker?.availability === 'offline' && <span className="offline-label">Offline</span>}
         </span>
         <span className="task-metadata">
           <span className={`type-chip ${task.type}`}>{label(task.type)}</span>

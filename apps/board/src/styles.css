@@ -86,7 +86,7 @@
 }
 body {
   margin: 0;
-  min-width: 360px;
+  min-width: 320px;
 }
 button,
 input,
@@ -888,7 +888,7 @@ fieldset {
     gap: 12px;
   }
   .worker-status {
-    display: none;
+    font-size: 10px;
   }
   .main-content {
     padding: 16px;
@@ -920,6 +920,9 @@ fieldset {
   .header-right {
     width: 100%;
     justify-content: flex-end;
+  }
+  .worker-status {
+    margin-right: auto;
   }
   .dialog-content {
     padding: 22px;
@@ -958,4 +961,8 @@ fieldset {
 }
 .type-chip {
   white-space: nowrap;
+}
+.offline-label {
+  color: var(--muted);
+  font-size: 9px;
 }

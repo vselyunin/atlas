@@ -20,6 +20,9 @@ export function Dialog({
   const [returnFocus] = useState(() =>
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
+  const [returnTaskId] = useState(
+    () => returnFocus?.closest<HTMLElement>('[data-task-id]')?.dataset.taskId,
+  );
   return (
     <DialogPrimitive.Root
       open
@@ -42,9 +45,18 @@ export function Dialog({
             }
           }}
           onCloseAutoFocus={(event) => {
-            if (returnFocus?.isConnected) {
+            const taskCard = returnTaskId
+              ? Array.from(document.querySelectorAll<HTMLElement>('[data-task-id]')).find(
+                  (card) => card.dataset.taskId === returnTaskId,
+                )
+              : undefined;
+            const target = returnFocus?.isConnected
+              ? returnFocus
+              : (taskCard?.querySelector<HTMLElement>('.task-title') ??
+                document.querySelector<HTMLElement>('.resource-trigger[aria-label="Project"]'));
+            if (target) {
               event.preventDefault();
-              returnFocus.focus();
+              target.focus();
             }
           }}
         >
