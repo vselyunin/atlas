@@ -34,12 +34,12 @@
 
 **Interfaces:** Export `ThemePreference = 'system' | 'light' | 'dark'`, `ResolvedTheme = 'light' | 'dark'`, `initializeTheme(): void`, `getThemePreference(): ThemePreference`, `setThemePreference(value: ThemePreference): void`, and `subscribeTheme(listener: () => void): () => void`. `useTheme(): { preference: ThemePreference; setPreference: (value: ThemePreference) => void }` uses the external store subscription.
 
-- [ ] Implement safe preference loading under `atlas.theme`, using System for missing/invalid values. Resolve against `matchMedia('(prefers-color-scheme: dark)')`, with light fallback if unavailable. Storage read/write errors must not break the UI.
-- [ ] Apply `data-theme` and `color-scheme` to the root and update the existing theme-color meta tag. Initialize before `createRoot` and keep a minimal early initialization in the HTML head to prevent a flash before the application module loads. Use the same storage key and resolution semantics in both paths.
-- [ ] Register the system-change listener once, notify subscribers on preference changes, and follow system changes only when preference is System. Keep the browser-only lifecycle outside React StrictMode effects.
-- [ ] Replace component-level literal colors in `styles.css` with named tokens for page/surface/column, text/muted text, borders, actions, focus, shadows and semantic states. Define all light and dark values centrally; cover forms, errors, provisioning, disabled states and drag feedback.
-- [ ] Add new tests asserting: missing/invalid storage gives System; dark system resolves dark; explicit Light remains light after a system event; selecting System resumes device tracking; explicit preference survives reinitialization; throwing storage getters/setters do not prevent application; missing matchMedia resolves light.
-- [ ] Run contracts build, Board typecheck and the new theme test. Review that every token has both palette definitions. Commit as `feat(board): add persistent system-aware themes` once checks pass.
+- [x] Implement safe preference loading under `atlas.theme`, using System for missing/invalid values. Resolve against `matchMedia('(prefers-color-scheme: dark)')`, with light fallback if unavailable. Storage read/write errors must not break the UI.
+- [x] Apply `data-theme` and `color-scheme` to the root and update the existing theme-color meta tag. Initialize before `createRoot` and keep a minimal early initialization in the HTML head to prevent a flash before the application module loads. Use the same storage key and resolution semantics in both paths.
+- [x] Register the system-change listener once, notify subscribers on preference changes, and follow system changes only when preference is System. Keep the browser-only lifecycle outside React StrictMode effects.
+- [x] Replace component-level literal colors in `styles.css` with named tokens for page/surface/column, text/muted text, borders, actions, focus, shadows and semantic states. Define all light and dark values centrally; cover forms, errors, provisioning, disabled states and drag feedback.
+- [x] Add new tests asserting: missing/invalid storage gives System; dark system resolves dark; explicit Light remains light after a system event; selecting System resumes device tracking; explicit preference survives reinitialization; throwing storage getters/setters do not prevent application; missing matchMedia resolves light.
+- [x] Run contracts build, Board typecheck and the new theme test. Review that every token has both palette definitions. Commit as `feat(board): add persistent system-aware themes` once checks pass.
 
 ## Task 2: Compact header and accessible menus
 
@@ -47,13 +47,13 @@
 
 **Interfaces:** `BoardHeader` consumes `projects: Project[]`, `projectId: string`, `versions: Version[]`, `versionId: string`, `ready: boolean`, `taskCreationDisabled: boolean`, `workerStatus: string`, `onSelectProject(id: string)`, `onSelectVersion(id: string)`, `onCreateProject()`, `onCreateVersion()`, `onCreateTask()`. It consumes `useTheme()` from Task 1. Query ownership and selected-task resets remain in App.
 
-- [ ] Add the compatible `@radix-ui/react-dropdown-menu` dependency; inspect existing Radix versions and available package exports before writing the wrapper. Export styled Root/Trigger/Content/Item/Separator primitives used by this feature. Use Lucide ChevronDown consistently. Keep focus management provided by the primitive.
-- [ ] Implement project/version menu buttons with accessible names `Project` and `Version`, current values visible, and creation items `Create project` / `Create version` first. Show selection with background/weight and accessible selected semantics, without visible checkmarks. Preserve existing dialog submit labels.
-- [ ] Implement the circular `User settings` trigger, identity and a compact native Appearance select with System/Light/Dark values. Remove explanatory helper text. Ensure interacting with the select does not unexpectedly dismiss the menu; use suitable Radix composition and verify keyboard behavior.
-- [ ] Move New task into the header, retaining its disabled conditions. Move Worker availability into the same header. Remove old toolbar, oversized title, metadata strip and decorative footer; retain useful errors, provisioning and the first-project empty state.
-- [ ] Apply consistent 36px header control heights and aligned chevrons, with a 64px desktop header. Truncate long trigger labels, keep full names available in menus, permit wrapping at narrow widths and prevent menu clipping. Board should fill remaining available height without hiding overflow.
-- [ ] Add tests for creation callbacks and menu order, current project/version selection, disabled task creation, empty/pending projects, avatar theme changes, Escape and focus return. Use distinct sample project/version names to prove the selected callback receives the correct ID.
-- [ ] Run Board typecheck, package tests and targeted lint. Commit as `feat(board): consolidate navigation into compact menus` after passing checks.
+- [x] Add the compatible `@radix-ui/react-dropdown-menu` dependency; inspect existing Radix versions and available package exports before writing the wrapper. Export styled Root/Trigger/Content/Item/Separator primitives used by this feature. Use Lucide ChevronDown consistently. Keep focus management provided by the primitive.
+- [x] Implement project/version menu buttons with accessible names `Project` and `Version`, current values visible, and creation items `Create project` / `Create version` first. Show selection with background/weight and accessible selected semantics, without visible checkmarks. Preserve existing dialog submit labels.
+- [x] Implement the circular `User settings` trigger, identity and a compact native Appearance select with System/Light/Dark values. Remove explanatory helper text. Ensure interacting with the select does not unexpectedly dismiss the menu; use suitable Radix composition and verify keyboard behavior.
+- [x] Move New task into the header, retaining its disabled conditions. Move Worker availability into the same header. Remove old toolbar, oversized title, metadata strip and decorative footer; retain useful errors, provisioning and the first-project empty state.
+- [x] Apply consistent 36px header control heights and aligned chevrons, with a 64px desktop header. Truncate long trigger labels, keep full names available in menus, permit wrapping at narrow widths and prevent menu clipping. Board should fill remaining available height without hiding overflow.
+- [x] Add tests for creation callbacks and menu order, current project/version selection, disabled task creation, empty/pending projects, avatar theme changes, Escape and focus return. Use distinct sample project/version names to prove the selected callback receives the correct ID.
+- [x] Run Board typecheck, package tests and targeted lint. Commit as `feat(board): consolidate navigation into compact menus` after passing checks.
 
 ## Task 3: Card layout and theme coverage
 
@@ -61,11 +61,11 @@
 
 **Interfaces:** Preserve `BoardDnd` props and existing task/Worker contracts. No new mutation or drag/drop API.
 
-- [ ] Move the type chip into the footer beside priority. Remove priority icon imports/selection logic. Keep the named drag handle accessible near the title without an empty top row; preserve its listeners, touch behavior and keyboard sensor.
-- [ ] Keep assignee labels readable with long names and wrap footer metadata if needed. Preserve offline indicators and textual priority labels. Check all four task types and priorities against both palettes.
-- [ ] Add an observable card rendering test that verifies type and priority appear in the footer, title remains a button and the named drag handle remains available. Retain existing drag logic and status rules.
-- [ ] Inspect light/dark dialogs, menus, fields, empty/error/loading/disabled states and drag feedback in a browser, correcting production styles where needed. Verify readable text and visible focus, including portaled elements.
-- [ ] Run Board tests/typecheck and production build. Commit as `feat(board): streamline task cards for both themes`.
+- [x] Move the type chip into the footer beside priority. Remove priority icon imports/selection logic. Keep the named drag handle accessible near the title without an empty top row; preserve its listeners, touch behavior and keyboard sensor.
+- [x] Keep assignee labels readable with long names and wrap footer metadata if needed. Preserve offline indicators and textual priority labels. Check all four task types and priorities against both palettes.
+- [x] Add an observable card rendering test that verifies type and priority appear in the footer, title remains a button and the named drag handle remains available. Retain existing drag logic and status rules.
+- [x] Inspect light/dark dialogs, menus, fields, empty/error/loading/disabled states and drag feedback in a browser, correcting production styles where needed. Verify readable text and visible focus, including portaled elements.
+- [x] Run Board tests/typecheck and production build. Commit as `feat(board): streamline task cards for both themes`.
 
 ## Task 4: Acceptance and persistent UI conventions
 
@@ -73,12 +73,12 @@
 
 **Interfaces:** Browser assertions use root `data-theme`, header menu names from Task 2, and the existing isolated e2e startup helper. No test runner or helper changes are planned.
 
-- [ ] Request permission for these exact existing-test edits: in `atlas.spec.ts`, open Version then choose Create version instead of clicking the old Add version header button; open Project then choose Create project instead of the old header button. In `rollback.spec.ts`, replace native project `selectOption(project.id)` with Project menu selection by the unique name Rollback checks. Preserve all assertions, task interactions and repository checks. Do not edit until authorized.
-- [ ] Add browser coverage for first-load system dark/light, live system switching, manual override persistence after reload, returning to System, and theme inheritance on open menus/dialogs. Exercise the actual avatar selector, not only storage injection. Separately simulate unavailable storage and assert startup and selection remain functional.
-- [ ] Check keyboard open/dismiss/focus return and creation from both header menus. At desktop and narrow viewport sizes inspect long names, menu bounds, header reachability, card footer wrapping and horizontal board scrolling. Use temporary projects, not the personal workspace.
-- [ ] Document the requirement in Board AGENTS: every new/changed UI feature uses shared semantic tokens, supports both themes including interaction states, and receives browser checks in both. Replace the stale reference to nonexistent Board mocks with guidance to use fixtures/mocks where applicable. Extend the verification skill with the procedure, referencing the Board policy rather than duplicating it.
-- [ ] Run `pnpm check` and `pnpm test:e2e`; record exact results and any limits. Validate the changed skill and check documentation formatting. If tests need further edits, ask for their precise scope rather than broadening approval.
-- [ ] Review the full diff against the approved mockup/spec. Report review availability honestly. Commit as `test(board): verify themes and compact navigation` with documentation in the same feature commit or a separate `docs(board)` commit.
+- [x] Request permission for these exact existing-test edits: in `atlas.spec.ts`, open Version then choose Create version instead of clicking the old Add version header button; open Project then choose Create project instead of the old header button. In `rollback.spec.ts`, replace native project `selectOption(project.id)` with Project menu selection by the unique name Rollback checks. Preserve all assertions, task interactions and repository checks. Do not edit until authorized.
+- [x] Add browser coverage for first-load system dark/light, live system switching, manual override persistence after reload, returning to System, and theme inheritance on open menus/dialogs. Exercise the actual avatar selector, not only storage injection. Separately simulate unavailable storage and assert startup and selection remain functional.
+- [x] Check keyboard open/dismiss/focus return and creation from both header menus. At desktop and narrow viewport sizes inspect long names, menu bounds, header reachability, card footer wrapping and horizontal board scrolling. Use temporary projects, not the personal workspace.
+- [x] Document the requirement in Board AGENTS: every new/changed UI feature uses shared semantic tokens, supports both themes including interaction states, and receives browser checks in both. Replace the stale reference to nonexistent Board mocks with guidance to use fixtures/mocks where applicable. Extend the verification skill with the procedure, referencing the Board policy rather than duplicating it.
+- [x] Run `pnpm check` and `pnpm test:e2e`; record exact results and any limits. Validate the changed skill and check documentation formatting. If tests need further edits, ask for their precise scope rather than broadening approval.
+- [x] Review the full diff against the approved mockup/spec. Report review availability honestly. Commit as `test(board): verify themes and compact navigation` with documentation in the same feature commit or a separate `docs(board)` commit.
 
 ## Execution and completion
 
@@ -91,3 +91,33 @@ Self-review: each design section maps to a task; all five review conditions have
 checks assigned above. Test permissions are limited to the two named browser
 files and the described interaction updates. API/Worker tests remain unchanged.
 Do not merge or push without user direction.
+
+## Execution results — 2026-11-20
+
+Implemented inline on `feat/board-themes` in a managed worktree. The approved
+main checkout was left unchanged. `pnpm check` passed: lint, formatting,
+TypeScript, 70 package tests plus 1 real integration test, and production builds.
+All 7 browser acceptance tests passed. The verification skill validator passed.
+
+An independent reviewer inspected the complete change. Findings about narrow
+Worker status, offline-assignee visibility and focus return after a task moves
+were fixed and covered by new tests. The 320px overflow finding was treated as
+an accessibility issue and fixed, with browser coverage. Settled screenshots
+were captured separately because acceptance screenshots can occur during theme
+transitions. No independent second review was performed after the fixes; checks
+and regression tests were rerun.
+
+Implementation decisions: use a Radix Popover for the avatar's native Appearance
+select, retain Dropdown Menu for project/version actions, and use pointer hit
+coordinates for tall-column dragging with geometric keyboard fallback. The
+fresh worktree needed the documented contracts build before tests. The user's
+no-mandatory-TDD rule took precedence over generic skill defaults.
+
+Existing tests changed only with explicit permission: navigation in the two
+original browser tests; formatting the new theme test; removing unsupported
+query options from new header/card tests. Assertions were preserved.
+
+Build succeeds with an advisory about the main client bundle exceeding 500 kB
+uncompressed (approximately 515 kB, 159 kB gzip). No bundle-splitting or warning
+threshold changes were included in this UI task. The preview uses separate
+ports and worktree-local data; screenshots use disposable data.
