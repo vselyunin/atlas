@@ -3,7 +3,27 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f7f8fa" />
+    <meta name="theme-color" content="#f5f5f5" />
+    <script>
+      // Resolve before the application and stylesheet load to avoid a light flash.
+      (() => {
+        let preference = 'system';
+        try {
+          const stored = localStorage.getItem('atlas.theme');
+          if (stored === 'light' || stored === 'dark') preference = stored;
+        } catch {}
+        const dark =
+          preference === 'dark' ||
+          (preference === 'system' &&
+            typeof matchMedia === 'function' &&
+            matchMedia('(prefers-color-scheme: dark)').matches);
+        const theme = dark ? 'dark' : 'light';
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        document.documentElement.style.backgroundColor = dark ? '#101010' : '#f5f5f5';
+        document.querySelector('meta[name="theme-color"]').content = dark ? '#101010' : '#f5f5f5';
+      })();
+    </script>
     <title>Atlas · Your workspace</title>
   </head>
   <body>
