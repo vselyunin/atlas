@@ -43,7 +43,7 @@ function setup(ready = true) {
   return actions;
 }
 async function open(name: string) {
-  const trigger = screen.getByRole('button', { name, exact: true });
+  const trigger = screen.getByRole('button', { name });
   trigger.focus();
   fireEvent.keyDown(trigger, { key: 'ArrowDown' });
   await screen.findByRole('menu');
@@ -79,12 +79,8 @@ it('selects a version and exposes version creation first', async () => {
 });
 it('keeps project creation available with no ready project while disabling version and task', async () => {
   setup(false);
-  expect(
-    screen.getByRole<HTMLButtonElement>('button', { name: 'Version', exact: true }).disabled,
-  ).toBe(true);
-  expect(
-    screen.getByRole<HTMLButtonElement>('button', { name: 'New task', exact: true }).disabled,
-  ).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Version' }).disabled).toBe(true);
+  expect(screen.getByRole<HTMLButtonElement>('button', { name: 'New task' }).disabled).toBe(true);
   await open('Project');
   expect(screen.getByRole('menuitem', { name: 'Create project' })).toBeTruthy();
 });

@@ -30,6 +30,8 @@
   --error-text: #a13227;
   --error-bg: #fbeae7;
   --success: #416d37;
+  --drop-bg: #e0e8f5;
+  --border-active: #356bc4;
 }
 
 :root[data-theme='dark'] {
@@ -62,6 +64,8 @@
   --error-text: #f0b3a9;
   --error-bg: #3c2522;
   --success: #a1ca96;
+  --drop-bg: #232d3c;
+  --border-active: #8bb3ec;
 }
 
 :root {
@@ -207,7 +211,7 @@ a {
 .primary {
   background: var(--action);
   border-color: var(--action);
-  color: var(--muted);
+  color: var(--on-action);
   box-shadow: 0 2px 4px var(--shadow);
 }
 .primary:hover:not(:disabled) {
@@ -236,8 +240,8 @@ a {
   transition: background 0.15s;
 }
 .drop-over {
-  background: var(--subtle);
-  border-color: var(--border);
+  background: var(--drop-bg);
+  border-color: var(--border-active);
 }
 .column-heading {
   padding: 1px 5px 14px;
@@ -284,7 +288,7 @@ a {
   margin-bottom: 10px;
 }
 .task-card:hover {
-  border-color: var(--border);
+  border-color: var(--border-active);
   box-shadow: 0 3px 8px var(--shadow);
 }
 .dragging {
@@ -920,4 +924,38 @@ fieldset {
   .dialog-content {
     padding: 22px;
   }
+}
+
+.card-top {
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 0;
+}
+.task-title {
+  min-width: 0;
+  font-size: 13px;
+}
+.drag-handle {
+  flex: none;
+  padding: 2px;
+}
+.card-description {
+  font-size: 11px;
+}
+.card-footer {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+.task-metadata {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+.assignee,
+.priority {
+  font-size: 10px;
+}
+.type-chip {
+  white-space: nowrap;
 }

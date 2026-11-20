@@ -3,11 +3,12 @@ import {
   KeyboardSensor,
   PointerSensor,
   closestCorners,
+  pointerWithin,
   useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import type { DragEndEvent } from '@dnd-kit/core';
+import type { CollisionDetection, DragEndEvent } from '@dnd-kit/core';
 import {
   SortableContext,
   sortableKeyboardCoordinates,
@@ -15,19 +16,18 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import {
-  GripVertical,
-  Plus,
-  UserRound,
-  Bot,
-  ArrowUp,
-  Minus,
-  ChevronsUp,
-  ArrowDown,
-} from 'lucide-react';
+import { GripVertical, Plus, UserRound, Bot } from 'lucide-react';
 import { TaskStatusSchema, TASK_STATUS_LABELS } from '@atlas/contracts';
 import type { Task, TaskStatus, Worker } from '@atlas/contracts';
 import { label } from '../tasks/TaskFields';
+
+// Tall columns have distant corners: use the pointer's actual target for mouse
+// and touch input, while retaining geometry-based detection for keyboard moves.
+const boardCollisionDetection: CollisionDetection = (args) => {
+  const hits = pointerWithin(args);
+  const cards = hits.filter((hit) => !String(hit.id).startsWith('column:'));
+  return cards.length ? cards : hits.length ? hits : closestCorners(args);
+};
 
 function TaskCard({
   task,
@@ -45,14 +45,6 @@ function TaskCard({
     disabled,
   });
   const worker = workers.find((item) => item.id === task.assigneeId);
-  const PriorityIcon =
-    task.priority === 'urgent'
-      ? ChevronsUp
-      : task.priority === 'high'
-        ? ArrowUp
-        : task.priority === 'low'
-          ? ArrowDown
-          : Minus;
   return (
     <article
       ref={setNodeRef}
@@ -61,7 +53,9 @@ function TaskCard({
       data-task-id={task.id}
     >
       <div className="card-top">
-        <span className={`type-chip ${task.type}`}>{label(task.type)}</span>
+        <button className="task-title" onClick={() => onOpen(task)}>
+          {task.title}
+        </button>
         <button
           className="drag-handle"
           aria-label={`Move ${task.title}`}
@@ -71,9 +65,6 @@ function TaskCard({
           <GripVertical size={15} />
         </button>
       </div>
-      <button className="task-title" onClick={() => onOpen(task)}>
-        {task.title}
-      </button>
       {task.description && <p className="card-description">{task.description}</p>}
       <div className="card-footer">
         <span
@@ -86,9 +77,11 @@ function TaskCard({
           <span>{worker?.name ?? 'Unassigned'}</span>
           {worker?.availability === 'offline' && <span className="offline-dot" />}
         </span>
-        <span className={`priority ${task.priority}`} title={`${label(task.priority)} priority`}>
-          <PriorityIcon size={13} />
-          {label(task.priority)}
+        <span className="task-metadata">
+          <span className={`type-chip ${task.type}`}>{label(task.type)}</span>
+          <span className={`priority ${task.priority}`} title={`${label(task.priority)} priority`}>
+            {label(task.priority)}
+          </span>
         </span>
       </div>
     </article>
@@ -194,7 +187,7 @@ export function BoardDnd({
     }
   };
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCorners} onDragEnd={onEnd}>
+    <DndContext sensors={sensors} collisionDetection={boardCollisionDetection} onDragEnd={onEnd}>
       <div className="board-grid">
         {TaskStatusSchema.options.map((status) => (
           <TaskColumn

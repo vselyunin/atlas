@@ -1,7 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 export function Dialog({
   title,
@@ -16,6 +16,7 @@ export function Dialog({
   onClose: () => void;
   panel?: boolean;
 }) {
+  const content = useRef<HTMLDivElement>(null);
   const [returnFocus] = useState(() =>
     document.activeElement instanceof HTMLElement ? document.activeElement : null,
   );
@@ -29,7 +30,17 @@ export function Dialog({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="dialog-overlay" />
         <DialogPrimitive.Content
+          ref={content}
           className={panel ? 'dialog-content task-panel' : 'dialog-content'}
+          onOpenAutoFocus={(event) => {
+            const field = content.current?.querySelector<HTMLElement>(
+              'input:not([disabled]), textarea:not([disabled]), select:not([disabled])',
+            );
+            if (field) {
+              event.preventDefault();
+              field.focus();
+            }
+          }}
           onCloseAutoFocus={(event) => {
             if (returnFocus?.isConnected) {
               event.preventDefault();
