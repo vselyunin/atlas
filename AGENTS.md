@@ -16,3 +16,12 @@ Use `pnpm dev` for the local stack and `pnpm --filter @atlas/<package> <command>
 There is no mandatory TDD. Add useful new tests as needed. Existing tests require explicit user permission to modify. This includes deleting, skipping or disabling tests, weakening assertions, updating snapshots or expected fixtures, and changing configuration to exclude or bypass coverage. Identify the affected files, exact changes, and why they are necessary when requesting permission. A failure alone provides no authorization. Fix production behavior where appropriate and report remaining test failures.
 
 Use read-only lint and format checks. Keep protected tests out of default formatting writes and avoid blanket lint autofix. Before a commit, review the diff and confirm applicable checks. Never amend or rewrite history without authorization.
+
+Test protection also covers startup helpers, test configuration and syntax-only or formatting changes. Permission applies only to the specific files and changes approved; reuse that permission without asking again, but do not extend it to unrelated edits.
+
+When reporting verification, distinguish self-review from independent review. If independent review is unavailable, say so and identify what was actually checked.
+
+Repository skills provide focused workflows without replacing these rules:
+
+- [Atlas contract changes](.agents/skills/atlas-contract-changes/SKILL.md): shared schemas, HTTP/Worker messages and compatibility across consumers.
+- [Atlas feature verification](.agents/skills/atlas-feature-verification/SKILL.md): selecting checks, isolating runtime tests and reporting evidence.

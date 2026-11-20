@@ -62,3 +62,31 @@ commit range with `pnpm check:commits -- <base-commit>`.
 
 Run `pnpm setup:hooks` once after cloning to enable the repository's commit-message
 hook. It checks messages without modifying source or tests.
+
+## Browser verification and troubleshooting
+
+Run `pnpm test:e2e` for browser acceptance. Install Playwright Chromium with
+`pnpm exec playwright install chromium` if needed; its platform runtime libraries
+must also be available. Browser tests use temporary data and separate ports
+configured in `playwright.config.ts` and `scripts/e2e-server.mjs`.
+
+The startup helper waits for the API and the intended Worker to be online before
+starting the Board. A reachable Board alone does not mean the stack is ready.
+Any replacement harness must clean up its child processes and temporary state
+on success, failure and interruption. Keep personal `.atlas` data out of tests.
+
+If the Worker is missing or offline:
+
+1. Check API and Worker startup output, then request `/api/v1/workers` on the
+   configured API port to inspect registration and availability.
+2. Confirm the Worker WebSocket URL points to that API and both processes use
+   the same token. Do not print or paste the token into logs or the Board.
+3. Check for a duplicate Worker identity or an already-running process using
+   its state directory. Inspect ownership before stopping any process; do not
+   delete a lock or journal to bypass the problem.
+4. Confirm the workspace and state paths are accessible Linux paths, with Worker
+   state outside the repository workspace. Preserve journals when investigating
+   failed operations or reconnects.
+
+For an occupied test port or missing browser dependency, report the environment
+problem separately from application failures. Do not weaken tests to hide it.
