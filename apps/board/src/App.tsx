@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus, Layers3, FolderGit2, LayoutGrid, ChevronRight, CircleHelp } from 'lucide-react';
+import { Plus, Layers3 } from 'lucide-react';
 import type { Task, TaskStatus } from '@atlas/contracts';
 import { useProjects, useVersions, useTasks, useWorkers } from './lib/queries';
 import { errorMessage } from './lib/api';
@@ -10,6 +10,7 @@ import { CreateVersionDialog } from './features/projects/CreateVersionDialog';
 import { ProjectProvisioning } from './features/projects/ProjectProvisioning';
 import { CreateTaskDialog } from './features/tasks/CreateTaskDialog';
 import { TaskDetails } from './features/tasks/TaskDetails';
+import { BoardHeader } from './features/layout/BoardHeader';
 
 export function App() {
   const [projectId, setProjectId] = useState('');
@@ -45,113 +46,28 @@ export function App() {
   const error = projects.error ?? versions.error ?? tasks.error;
   return (
     <>
-      <header className="app-header">
-        <a className="brand" href="/" aria-label="Atlas home">
-          <span className="brand-mark">
-            <Layers3 size={22} />
-          </span>
-          atlas
-          <span className="brand-divider" />
-        </a>
-        <span className="workspace-label">Personal workspace</span>
-        <div className="header-right">
-          <span className="local-badge">
-            <span />
-            Local
-          </span>
-          <span className="user-avatar" title="Vladi">
-            V
-          </span>
-        </div>
-      </header>
-      <div className="workspace-toolbar">
-        <div className="selectors">
-          <FolderGit2 size={17} className="muted" />
-          <label className="sr-only" htmlFor="project-select">
-            Project
-          </label>
-          <select
-            id="project-select"
-            className="toolbar-select"
-            value={project?.id ?? ''}
-            onChange={(e) => selectProject(e.target.value)}
-          >
-            <option value="" disabled>
-              Select project
-            </option>
-            {projects.data?.items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="icon-button"
-            aria-label="Create project"
-            onClick={() => setDialog('project')}
-          >
-            <Plus size={16} />
-          </button>
-          <ChevronRight size={15} className="muted" />
-          <label className="sr-only" htmlFor="version-select">
-            Version
-          </label>
-          <select
-            id="version-select"
-            className="toolbar-select version-select"
-            value={version?.id ?? ''}
-            disabled={!ready}
-            onChange={(e) => {
-              setVersionId(e.target.value);
-              setSelectedId(null);
-            }}
-          >
-            <option value="" disabled>
-              Version
-            </option>
-            {versions.data?.items.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="icon-button"
-            aria-label="Add version"
-            disabled={!ready}
-            onClick={() => setDialog('version')}
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-        <span
-          className="worker-status"
-          title={workers.error ? errorMessage(workers.error) : 'Registered workers from the API'}
-        >
-          <span className={online ? 'online-dot' : 'offline-dot'} />
-          {workers.error
+      <BoardHeader
+        projects={projects.data?.items ?? []}
+        projectId={project?.id ?? ''}
+        versions={versions.data?.items ?? []}
+        versionId={version?.id ?? ''}
+        ready={ready}
+        taskCreationDisabled={!ready || !version || move.isPending || tasks.isPending}
+        workerStatus={
+          workers.error
             ? 'Workers unavailable'
-            : `${online} worker${online === 1 ? '' : 's'} online`}
-        </span>
-      </div>
-      <main className="main-content">
-        <div className="page-heading">
-          <div>
-            <div className="eyebrow">BUILD SOMETHING GOOD</div>
-            <h1>
-              Project board<span className="heading-dot">.</span>
-            </h1>
-            <p>A little structure. A lot of possibility.</p>
-          </div>
-          <button
-            className="button primary"
-            disabled={!ready || !version || move.isPending}
-            onClick={() => setDialog('task')}
-          >
-            <Plus size={17} />
-            New task
-          </button>
-        </div>
+            : `${online} worker${online === 1 ? '' : 's'} online`
+        }
+        onSelectProject={selectProject}
+        onSelectVersion={(id) => {
+          setVersionId(id);
+          setSelectedId(null);
+        }}
+        onCreateProject={() => setDialog('project')}
+        onCreateVersion={() => setDialog('version')}
+        onCreateTask={() => setDialog('task')}
+      />
+      <main className="main-content" aria-label="Project board">
         {error && (
           <div className="error-banner" role="alert">
             {errorMessage(error)}
@@ -198,17 +114,6 @@ export function App() {
           <ProjectProvisioning project={project} />
         ) : (
           <>
-            <div className="board-meta">
-              <span>
-                <LayoutGrid size={15} />
-                Board
-              </span>
-              <span>
-                {items.length} task{items.length === 1 ? '' : 's'}
-                <i />
-                {version?.name ?? 'Loading version…'}
-              </span>
-            </div>
             {tasks.isPending && version ? (
               <p className="loading-message" role="status">
                 Loading tasks…
@@ -222,17 +127,9 @@ export function App() {
               onMove={onMove}
               disabled={move.isPending || !version || tasks.isPending}
             />
-            <div className="board-footnote">
-              <CircleHelp size={14} />
-              Drag cards to move work forward. New tasks start in Backlog.
-            </div>
           </>
         )}
       </main>
-      <footer className="app-footer">
-        <span>ATLAS</span>
-        <span>Your work, at your pace.</span>
-      </footer>
       {dialog === 'project' && (
         <CreateProjectDialog workers={workerItems} onClose={close} onCreated={selectProject} />
       )}
