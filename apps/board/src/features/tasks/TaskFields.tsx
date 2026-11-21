@@ -1,3 +1,4 @@
+import { Select } from '../../components/ui/select';
 import type { TaskCreate, Worker, Version } from '@atlas/contracts';
 import { PrioritySchema, TaskTypeSchema } from '@atlas/contracts';
 
@@ -50,7 +51,7 @@ export function TaskFields({
       <div className="form-row">
         <label>
           Type
-          <select
+          <Select
             aria-label="Type"
             disabled={locked}
             value={value.type}
@@ -61,11 +62,11 @@ export function TaskFields({
                 {label(type)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label>
           Priority
-          <select
+          <Select
             aria-label="Priority"
             disabled={locked}
             value={value.priority}
@@ -76,12 +77,12 @@ export function TaskFields({
                 {label(priority)}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       </div>
       <label>
         Responsible worker
-        <select
+        <Select
           aria-label="Responsible worker"
           value={value.assigneeId ?? ''}
           disabled={locked}
@@ -107,12 +108,12 @@ export function TaskFields({
                 </option>
               ))}
           </optgroup>
-        </select>
+        </Select>
       </label>
       {versions && onVersionChange && (
         <label>
           Version
-          <select
+          <Select
             aria-label="Version"
             value={versionId}
             disabled={locked}
@@ -123,7 +124,7 @@ export function TaskFields({
                 {version.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       )}
     </div>

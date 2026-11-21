@@ -970,7 +970,7 @@ fieldset {
 .task-open {
   display: block;
   width: 100%;
-  padding: 14px;
+  padding: 10px;
   border: 0;
   border-radius: inherit;
   background: transparent;
@@ -983,7 +983,7 @@ fieldset {
   opacity: 0.35;
 }
 .drag-preview {
-  padding: 14px;
+  padding: 10px;
   cursor: grabbing;
   box-shadow: 0 10px 20px var(--shadow);
 }
@@ -1022,4 +1022,24 @@ fieldset {
 .empty-drop {
   height: 70px;
   margin-bottom: 0;
+}
+
+.field-select {
+  position: relative;
+  display: block;
+  margin-top: 7px;
+}
+.field-select select {
+  appearance: none;
+  margin-top: 0;
+  width: 100%;
+  padding-right: 34px;
+}
+.field-select > svg {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  color: var(--muted);
 }

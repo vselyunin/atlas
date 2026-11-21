@@ -52,8 +52,8 @@ export function createTask(
         id: randomUUID(),
         projectId,
         versionId,
-        status: 'backlog',
-        position: readColumn(tx, projectId, versionId, 'backlog').length,
+        status: input.status ?? 'backlog',
+        position: readColumn(tx, projectId, versionId, input.status ?? 'backlog').length,
         revision: 1,
         createdAt: now,
         updatedAt: now,
@@ -75,7 +75,7 @@ export function patchTask(
       const task = requireCurrentTask(tx, taskId, expectedRevision);
       if (
         task.status === 'done' ||
-        (task.status !== 'backlog' && Object.keys(changes).some((key) => key !== 'description'))
+        (task.status === 'working' && Object.keys(changes).some((key) => key !== 'description'))
       ) {
         throw new ApiError(
           403,
@@ -88,9 +88,9 @@ export function patchTask(
       const { versionId } = changes;
       if (versionId && versionId !== task.versionId) {
         requireVersion(tx, task.projectId, versionId);
-        const position = readColumn(tx, task.projectId, versionId, 'backlog').length;
+        const position = readColumn(tx, task.projectId, versionId, task.status).length;
         const relocated = updateTask(tx, task, { ...changes, position }, now);
-        const remaining = readColumn(tx, task.projectId, task.versionId, 'backlog');
+        const remaining = readColumn(tx, task.projectId, task.versionId, task.status);
         compactColumn(tx, remaining, now);
         return relocated;
       }

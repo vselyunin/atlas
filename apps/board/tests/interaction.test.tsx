@@ -29,10 +29,14 @@ it.each(['backlog', 'todo', 'working', 'done'] as const)(
         />
       </QueryClientProvider>,
     );
-    expect(screen.getByLabelText<HTMLInputElement>('Title').disabled).toBe(status !== 'backlog');
-    expect(screen.getByLabelText<HTMLSelectElement>('Type').disabled).toBe(status !== 'backlog');
+    expect(screen.getByLabelText<HTMLInputElement>('Title').disabled).toBe(
+      status !== 'backlog' && status !== 'todo',
+    );
+    expect(screen.getByLabelText<HTMLSelectElement>('Type').disabled).toBe(
+      status !== 'backlog' && status !== 'todo',
+    );
     expect(screen.getByLabelText<HTMLSelectElement>('Priority').disabled).toBe(
-      status !== 'backlog',
+      status !== 'backlog' && status !== 'todo',
     );
     expect(screen.getByLabelText<HTMLTextAreaElement>('Description').disabled).toBe(
       status === 'done',

@@ -4,19 +4,19 @@ The API defaults to port 4310 and the Board to port 5173. HTTP uses `/api/v1` an
 
 ## HTTP
 
-| Method | Path under `/api/v1`                             | Request body                                           | Success body                                       |
-| ------ | ------------------------------------------------ | ------------------------------------------------------ | -------------------------------------------------- |
-| GET    | `/projects`                                      |                                                        | `{items: Project[]}`                               |
-| GET    | `/projects/:projectId`                           |                                                        | `{project: Project}`                               |
-| POST   | `/projects`                                      | `{name, repository}`                                   | `{project: Project, operation: Operation \| null}` |
-| GET    | `/projects/:projectId/versions`                  |                                                        | `{items: Version[]}`                               |
-| POST   | `/projects/:projectId/versions`                  | `{name}`                                               | `{version: Version}`                               |
-| GET    | `/workers`                                       |                                                        | `{items: Worker[]}`                                |
-| GET    | `/projects/:projectId/versions/:versionId/tasks` |                                                        | `{items: Task[]}`                                  |
-| POST   | `/projects/:projectId/versions/:versionId/tasks` | `{title, description?, type?, priority?, assigneeId?}` | `{task: Task}`                                     |
-| PATCH  | `/tasks/:taskId`                                 | `{expectedRevision, changes}`                          | `{task: Task}`                                     |
-| POST   | `/tasks/:taskId/move`                            | `{expectedRevision, status, beforeTaskId}`             | `{task: Task}`                                     |
-| GET    | `/operations/:operationId`                       |                                                        | `{operation: Operation}`                           |
+| Method | Path under `/api/v1`                             | Request body                                                    | Success body                                       |
+| ------ | ------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------------------- |
+| GET    | `/projects`                                      |                                                                 | `{items: Project[]}`                               |
+| GET    | `/projects/:projectId`                           |                                                                 | `{project: Project}`                               |
+| POST   | `/projects`                                      | `{name, repository}`                                            | `{project: Project, operation: Operation \| null}` |
+| GET    | `/projects/:projectId/versions`                  |                                                                 | `{items: Version[]}`                               |
+| POST   | `/projects/:projectId/versions`                  | `{name}`                                                        | `{version: Version}`                               |
+| GET    | `/workers`                                       |                                                                 | `{items: Worker[]}`                                |
+| GET    | `/projects/:projectId/versions/:versionId/tasks` |                                                                 | `{items: Task[]}`                                  |
+| POST   | `/projects/:projectId/versions/:versionId/tasks` | `{title, description?, type?, priority?, assigneeId?, status?}` | `{task: Task}`                                     |
+| PATCH  | `/tasks/:taskId`                                 | `{expectedRevision, changes}`                                   | `{task: Task}`                                     |
+| POST   | `/tasks/:taskId/move`                            | `{expectedRevision, status, beforeTaskId}`                      | `{task: Task}`                                     |
+| GET    | `/operations/:operationId`                       |                                                                 | `{operation: Operation}`                           |
 
 Successful project creation returns 201 for an existing repository and 202 for local provisioning. Task and version creation return 201. The other successful HTTP routes return 200.
 
@@ -46,7 +46,7 @@ Names and titles are trimmed and limited to 1–200 characters. Descriptions acc
 
 ### Task revisions and ordering
 
-A new task starts in Backlog at revision 1. The creation defaults are an empty description, type `task`, priority `medium`, and no assignee. The task status values are `backlog`, `todo`, `working`, and `done`.
+A new task starts at revision 1. Creation accepts optional status `backlog` or `todo`; omitted status defaults to Backlog. Working and Done cannot be creation destinations. The creation defaults are an empty description, type `task`, priority `medium`, and no assignee. The task status values are `backlog`, `todo`, `working`, and `done`.
 
 The PATCH request changes at least one editable field. Supply the latest task revision as `expectedRevision`.
 
@@ -54,7 +54,7 @@ The PATCH request changes at least one editable field. Supply the latest task re
 { "expectedRevision": 1, "changes": { "priority": "high", "assigneeId": "human:vladi" } }
 ```
 
-Changing `versionId` appends the task to the target version's Backlog. Project association is immutable.
+All task fields are editable in Backlog and To do. Working permits description changes only; Done permits no field edits. Changing `versionId` appends the task to the same column in the target version and compacts the source column. Project association is immutable.
 
 To append to a different column, send a move with a null anchor.
 
@@ -63,6 +63,8 @@ To append to a different column, send a move with a null anchor.
 ```
 
 To insert before another task, pass its ID. The anchor must belong to the moved task's project and version and to the destination status. A missing or stale anchor returns 409. A self-anchor is a no-op after the revision check. A same-column no-op may retain its revision. The API serializes moves transactionally, compacts positions in affected columns, and increments revisions for changed tasks. Position is zero-based within project, version and status. Refetch affected task lists after mutations.
+
+The optional creation status extends the HTTP request only. Existing callers that omit it remain compatible; deploy the updated API before a Board that sends it, since older strict validators reject it. Persisted task rows and Worker messages are unchanged; no database migration or Worker protocol version change is needed.
 
 ### Errors
 

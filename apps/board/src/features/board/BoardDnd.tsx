@@ -134,7 +134,7 @@ function TaskColumn({
   tasks: Task[];
   target: DropTarget | null;
   activeId: string | null;
-  onCreate: () => void;
+  onCreate: (status: 'backlog' | 'todo') => void;
   disabled: boolean;
 } & Omit<CardProps, 'task' | 'keyboardActive' | 'disabled'> & { keyboardId: string | null }) {
   const { setNodeRef, isOver } = useDroppable({ id: `column:${status}`, disabled });
@@ -151,11 +151,11 @@ function TaskColumn({
         <span className={`status-dot ${status}`} />
         <h2>{TASK_STATUS_LABELS[status]}</h2>
         <span className="count">{tasks.length}</span>
-        {status === 'backlog' && (
+        {(status === 'backlog' || status === 'todo') && (
           <button
             className="icon-button column-add"
-            aria-label="Add task to Backlog"
-            onClick={onCreate}
+            aria-label={`Add task to ${TASK_STATUS_LABELS[status]}`}
+            onClick={() => onCreate(status === 'todo' ? 'todo' : 'backlog')}
             disabled={disabled}
           >
             <Plus size={16} />
@@ -175,20 +175,13 @@ function TaskColumn({
           </Fragment>
         ))}
         {destination && destination.before === null && <InsertionMarker empty={empty} />}
-        {!tasks.length && !destination && (
-          <p className="column-empty">
-            {status === 'backlog'
-              ? 'Your next idea starts here'
-              : status === 'todo'
-                ? 'Ready when you are'
-                : status === 'working'
-                  ? 'Make room for progress'
-                  : 'Good work lands here'}
-          </p>
-        )}
       </div>
-      {status === 'backlog' && (
-        <button className="add-task" onClick={onCreate} disabled={disabled}>
+      {(status === 'backlog' || status === 'todo') && !tasks.length && (
+        <button
+          className="add-task"
+          onClick={() => onCreate(status === 'todo' ? 'todo' : 'backlog')}
+          disabled={disabled}
+        >
           <Plus size={15} /> Add task
         </button>
       )}
@@ -207,7 +200,7 @@ export function BoardDnd({
   tasks: Task[];
   workers: Worker[];
   onOpen: (task: Task) => void;
-  onCreate: () => void;
+  onCreate: (status: 'backlog' | 'todo') => void;
   onMove: (task: Task, status: TaskStatus, before: string | null) => void;
   disabled: boolean;
 }) {

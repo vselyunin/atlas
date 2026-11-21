@@ -1,3 +1,4 @@
+import { Select } from '../../components/ui/select';
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TaskResponseSchema, TaskStatusSchema, TASK_STATUS_LABELS } from '@atlas/contracts';
@@ -29,12 +30,14 @@ export function TaskDetails({
     assigneeId: task.assigneeId,
   }));
   const [versionId, setVersionId] = useState(task.versionId);
+  const editable = task.status === 'backlog' || task.status === 'todo';
   const [saved, setSaved] = useState(false);
   const client = useQueryClient();
   const mutation = useMutation({
     mutationFn: () => {
-      const changes: TaskChanges =
-        task.status === 'backlog' ? { ...draft, versionId } : { description: draft.description };
+      const changes: TaskChanges = editable
+        ? { ...draft, versionId }
+        : { description: draft.description };
       return request(`/tasks/${task.id}`, TaskResponseSchema, {
         method: 'PATCH',
         body: JSON.stringify({ expectedRevision: task.revision, changes }),
@@ -58,7 +61,7 @@ export function TaskDetails({
     >
       <label className="status-field">
         Status
-        <select
+        <Select
           aria-label="Status"
           value={task.status}
           disabled={moving || mutation.isPending}
@@ -69,14 +72,14 @@ export function TaskDetails({
               {TASK_STATUS_LABELS[status]}
             </option>
           ))}
-        </select>
+        </Select>
       </label>
       <p className="field-note">
-        {task.status === 'backlog'
-          ? 'All fields are editable in Backlog.'
+        {editable
+          ? 'All fields are editable in Backlog and To do.'
           : task.status === 'done'
-            ? 'Done tasks are read-only. Move back to Backlog to make changes.'
-            : 'Only the description can be edited here. Move to Backlog to change other fields.'}
+            ? 'Done tasks are read-only. Move to Backlog or To do to make changes.'
+            : 'Only the description can be edited here. Move to Backlog or To do to change other fields.'}
       </p>
       <form
         onSubmit={(e) => {
@@ -92,7 +95,7 @@ export function TaskDetails({
               setSaved(false);
             }}
             workers={workers}
-            locked={task.status !== 'backlog'}
+            locked={!editable}
             descriptionLocked={task.status === 'done'}
             versions={versions}
             versionId={versionId}

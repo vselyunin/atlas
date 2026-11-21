@@ -16,6 +16,11 @@ export function App() {
   const [projectId, setProjectId] = useState('');
   const [versionId, setVersionId] = useState('');
   const [dialog, setDialog] = useState<'project' | 'version' | 'task' | null>(null);
+  const [creationStatus, setCreationStatus] = useState<'backlog' | 'todo'>('backlog');
+  const createTask = (status: 'backlog' | 'todo' = 'backlog') => {
+    setCreationStatus(status);
+    setDialog('task');
+  };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const projects = useProjects();
   const workers = useWorkers();
@@ -65,7 +70,7 @@ export function App() {
         }}
         onCreateProject={() => setDialog('project')}
         onCreateVersion={() => setDialog('version')}
-        onCreateTask={() => setDialog('task')}
+        onCreateTask={() => createTask()}
       />
       <main className="main-content" aria-label="Project board">
         {error && (
@@ -124,7 +129,7 @@ export function App() {
               tasks={items}
               workers={workerItems}
               onOpen={(task) => setSelectedId(task.id)}
-              onCreate={() => setDialog('task')}
+              onCreate={createTask}
               onMove={onMove}
               disabled={move.isPending || !version || tasks.isPending}
             />
@@ -139,6 +144,7 @@ export function App() {
       )}
       {dialog === 'task' && project && version && (
         <CreateTaskDialog
+          status={creationStatus}
           projectId={project.id}
           versionId={version.id}
           workers={workerItems}

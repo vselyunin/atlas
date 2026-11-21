@@ -37,6 +37,7 @@ export const TaskSchema = z.strictObject({
 });
 
 export const TaskCreateSchema = z.strictObject({
+  status: z.enum(['backlog', 'todo']).optional(),
   ...editableTaskFields,
   description: editableTaskFields.description.default(''),
   type: TaskTypeSchema.default('task'),

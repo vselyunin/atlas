@@ -9,11 +9,13 @@ import { TaskFields } from './TaskFields';
 
 export function CreateTaskDialog({
   projectId,
+  status = 'backlog',
   versionId,
   workers,
   onClose,
 }: {
   projectId: string;
+  status?: 'backlog' | 'todo';
   versionId: string;
   workers: Worker[];
   onClose: () => void;
@@ -30,7 +32,7 @@ export function CreateTaskDialog({
     mutationFn: () =>
       request(`/projects/${projectId}/versions/${versionId}/tasks`, TaskResponseSchema, {
         method: 'POST',
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, status }),
       }),
     onSuccess: async () => {
       await client.invalidateQueries({ queryKey: taskKey(projectId, versionId) });
@@ -38,7 +40,11 @@ export function CreateTaskDialog({
     },
   });
   return (
-    <Dialog title="New task" description="Every task starts in Backlog." onClose={onClose}>
+    <Dialog
+      title="New task"
+      description={`Create in ${status === 'todo' ? 'To do' : 'Backlog'}.`}
+      onClose={onClose}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();

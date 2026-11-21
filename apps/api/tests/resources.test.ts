@@ -127,8 +127,9 @@ describe('task rules', () => {
           changes: { description: 'Changed', priority: 'high' },
         },
       });
-      expect(forbidden.statusCode).toBe(status === 'backlog' ? 200 : 403);
-      if (status === 'backlog') current = TaskResponseSchema.parse(forbidden.json<unknown>()).task;
+      expect(forbidden.statusCode).toBe(status === 'backlog' || status === 'todo' ? 200 : 403);
+      if (status === 'backlog' || status === 'todo')
+        current = TaskResponseSchema.parse(forbidden.json<unknown>()).task;
       const description = await app.inject({
         method: 'PATCH',
         url: `/api/v1/tasks/${current.id}`,
