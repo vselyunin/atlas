@@ -283,7 +283,7 @@ a {
   border: 1px solid var(--border);
   background: var(--surface);
   border-radius: 7px;
-  padding: 14px;
+  padding: 0;
   box-shadow: 0 2px 3px var(--shadow);
   margin-bottom: 10px;
 }
@@ -965,4 +965,61 @@ fieldset {
 .offline-label {
   color: var(--muted);
   font-size: 9px;
+}
+
+.task-open {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: grab;
+  touch-action: auto;
+}
+.drag-source {
+  opacity: 0.35;
+}
+.drag-preview {
+  padding: 14px;
+  cursor: grabbing;
+  box-shadow: 0 10px 20px var(--shadow);
+}
+.drop-indicator {
+  position: relative;
+  height: 3px;
+  margin-bottom: -3px;
+  z-index: 2;
+  pointer-events: none;
+}
+.drop-indicator::before {
+  content: '';
+  position: absolute;
+  inset: -6px 0 auto;
+  height: 3px;
+  border-radius: 3px;
+  background: var(--focus);
+}
+.drop-indicator > span {
+  position: absolute;
+  right: 4px;
+  top: -20px;
+  padding: 2px 5px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-active);
+  border-radius: 4px;
+  font-size: 10px;
+}
+.empty-drop::before {
+  top: 8px;
+}
+.empty-drop > span {
+  top: 16px;
+}
+.empty-drop {
+  height: 70px;
+  margin-bottom: 0;
 }

@@ -120,6 +120,7 @@ export function App() {
               </p>
             ) : null}
             <BoardDnd
+              key={`${project.id}:${version?.id ?? ''}`}
               tasks={items}
               workers={workerItems}
               onOpen={(task) => setSelectedId(task.id)}

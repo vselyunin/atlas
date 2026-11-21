@@ -52,7 +52,8 @@ export function Dialog({
               : undefined;
             const target = returnFocus?.isConnected
               ? returnFocus
-              : (taskCard?.querySelector<HTMLElement>('.task-title') ??
+              : (taskCard?.querySelector<HTMLElement>('.task-open') ??
+                taskCard?.querySelector<HTMLElement>('.task-title') ??
                 document.querySelector<HTMLElement>('.resource-trigger[aria-label="Project"]'));
             if (target) {
               event.preventDefault();

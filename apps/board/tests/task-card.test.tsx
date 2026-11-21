@@ -29,7 +29,9 @@ it('keeps task type beside priority in the footer and preserves task and drag ac
   expect(within(footer).getByText('Epic')).toBeTruthy();
   expect(within(footer).getByText('High')).toBeTruthy();
   expect(within(footer).getByText('Vladi')).toBeTruthy();
-  expect(screen.getByRole('button', { name: 'Move Theme task' })).toBeTruthy();
-  await userEvent.click(screen.getByRole('button', { name: 'Theme task' }));
+  expect(
+    screen.getByRole('button', { name: 'Theme task' }).getAttribute('aria-roledescription'),
+  ).toBe('draggable');
+  await userEvent.click(within(footer).getByText('High'));
   expect(onOpen).toHaveBeenCalledWith(task);
 });

@@ -35,7 +35,7 @@ test('manage projects, versions, task fields, drag/drop and local repositories',
   await page.getByLabel('Status', { exact: true }).selectOption('backlog');
   await expect(page.getByLabel('Title', { exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Close', exact: true }).click();
-  const handle = page.getByRole('button', { name: 'Move Ship the board', exact: true });
+  const handle = page.getByRole('button', { name: 'Ship the board', exact: true });
   const source = await handle.boundingBox();
   const target = await page.getByRole('region', { name: 'To do', exact: true }).boundingBox();
   if (!source || !target) throw new Error('Missing drag targets');
