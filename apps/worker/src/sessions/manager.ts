@@ -13,10 +13,9 @@ import type {
   TerminalSize,
 } from '@atlas/contracts';
 import { resolveTarget } from '../repositories/paths.js';
+import type { WorkerConfig } from '../config.js';
 
 // Spike: one terminal session per task, each in its own Git worktree. Nothing survives a restart.
-
-const STOP_GRACE_MS = 5_000;
 
 const run = promisify(execFile);
 const succeeds = (promise: Promise<unknown>) =>
@@ -131,16 +130,20 @@ async function ensureWorktree(root: string, repository: string, payload: Session
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly pending = new Map<string, PendingStart>();
+  private readonly root: string;
   private readonly command: string[];
+  private readonly stopGraceMs: number;
   private queue: Promise<void> = Promise.resolve();
   private stopped = false;
 
   constructor(
-    private readonly root: string,
+    config: WorkerConfig,
     private readonly emit: (event: SessionEvent) => void,
-    command = process.env.ATLAS_AGENT_COMMAND ?? 'claude',
+    options: { stopGraceMs?: number } = {},
   ) {
-    this.command = command.split(/\s+/).filter(Boolean);
+    this.root = config.root;
+    this.command = config.agent.command;
+    this.stopGraceMs = options.stopGraceMs ?? 5_000;
   }
 
   start(payload: SessionStartPayload): Promise<void> {
@@ -251,7 +254,7 @@ export class SessionManager {
       } catch {
         // The process already exited.
       }
-    }, STOP_GRACE_MS);
+    }, this.stopGraceMs);
     session.killTimer.unref();
   }
 

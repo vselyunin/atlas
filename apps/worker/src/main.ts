@@ -1,11 +1,11 @@
 import { pathToFileURL } from 'node:url';
 import { loadConfig, prepareConfig } from './config.js';
-import type { WorkerConfig } from './config.js';
+import type { WorkerConfigInput } from './config.js';
 import { acquireLock } from './state/lock.js';
 import { Journal } from './state/journal.js';
 import { connect } from './connection.js';
 
-export function startWorker(input: WorkerConfig): { stop(): Promise<void> } {
+export function startWorker(input: WorkerConfigInput): { stop(): Promise<void> } {
   const config = prepareConfig(input);
   const release = acquireLock(config.stateDir);
   try {

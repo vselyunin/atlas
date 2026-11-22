@@ -33,7 +33,7 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
   };
   const envelope = () => ({ protocolVersion: 1 as const, messageId: randomUUID() });
   // Spike: output produced while disconnected is dropped.
-  const sessions = new SessionManager(config.root, (event) => send({ ...envelope(), ...event }));
+  const sessions = new SessionManager(config, (event) => send({ ...envelope(), ...event }));
   const replay = () => {
     for (const entry of journal.entries()) {
       if (entry.outcome && !entry.acknowledged)
