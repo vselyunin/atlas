@@ -1,6 +1,6 @@
 # Worker container and agent sandbox
 
-Status: draft, awaiting user approval.
+Status: written design approved by the user on 2026-11-23.
 
 ## Intent and scope
 
