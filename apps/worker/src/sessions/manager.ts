@@ -122,8 +122,9 @@ export class SessionManager {
         });
         if (abandoned()) return exit(stoppedEarly);
         // The agent and its arguments stay separate arguments, so no shell reads the prompt.
+        // `--` stops srt reading the agent's options as its own.
         file = 'srt';
-        args.unshift('--settings', settingsPath, agentFile);
+        args.unshift('--settings', settingsPath, '--', agentFile);
       }
       const terminal = pty.spawn(file, args, {
         name: 'xterm-256color',

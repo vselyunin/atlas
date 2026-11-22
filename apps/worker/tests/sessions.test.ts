@@ -288,9 +288,25 @@ describe('sessions in the agent sandbox', () => {
     expect(outputs(h)[0]).toBe(SANDBOX_ON_NOTICE);
     const settingsPath = join(h.stateDir, 'sessions', `${payload.sessionId}.json`);
     expect(await srt.calls()).toEqual([
-      ['--settings', settingsPath, 'sh', '-c', '! test -r "$1"', 'sh', h.stateDir],
-      ['--settings', settingsPath, process.execPath, agentPath],
+      ['--settings', settingsPath, '--', 'test', '!', '-e', settingsPath],
+      ['--settings', settingsPath, '--', process.execPath, agentPath],
     ]);
+  });
+
+  it('does not start the agent when the sandbox does not hide the Worker state', async () => {
+    const { h, srt } = await setupWithSrt('unsandboxed');
+    const payload = startPayload(randomUUID(), 'app');
+
+    await h.manager.start(payload);
+
+    const exit = await h.waitFor('session.exit', payload.sessionId);
+    expect(exit.payload).toMatchObject({
+      exitCode: null,
+      message:
+        'The agent sandbox could not start, so the agent was not started: the sandbox did not hide the Worker state folder',
+    });
+    expect(h.events.map((event) => event.type)).toEqual(['session.exit']);
+    expect(await srt.calls()).toHaveLength(1);
   });
 
   it('does not start the agent when the sandbox cannot start', async () => {

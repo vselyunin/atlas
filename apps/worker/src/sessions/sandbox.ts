@@ -109,6 +109,18 @@ function firstLine(text: string): string {
   );
 }
 
+function checkFailure(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const details = error as Error & { stderr?: unknown; code?: unknown; killed?: unknown };
+  const stderr = typeof details.stderr === 'string' ? firstLine(details.stderr) : '';
+  if (stderr) return stderr;
+  // The check ran but found the settings file: the sandbox was not in effect.
+  if (typeof details.code === 'number' && details.killed !== true) {
+    return 'the sandbox did not hide the Worker state folder';
+  }
+  return firstLine(error.message);
+}
+
 export async function prepareSandbox(input: {
   sessionKey: string;
   settings: SandboxSettings;
@@ -130,20 +142,15 @@ export async function prepareSandbox(input: {
     throw new SandboxUnavailableError(error instanceof Error ? error.message : String(error));
   }
   try {
-    // Prove the sandbox works: inside it, the Worker state directory must be unreadable.
-    await run(
-      'srt',
-      ['--settings', settingsPath, 'sh', '-c', '! test -r "$1"', 'sh', input.stateDir],
-      { cwd: input.cwd, env: input.env, timeout: CHECK_TIMEOUT_MS },
-    );
+    // Prove the sandbox works: the denied state folder appears empty inside it, so the settings
+    // file in it must not exist there. `--` stops srt reading the command's options as its own.
+    await run('srt', ['--settings', settingsPath, '--', 'test', '!', '-e', settingsPath], {
+      cwd: input.cwd,
+      env: input.env,
+      timeout: CHECK_TIMEOUT_MS,
+    });
   } catch (error) {
-    const stderr =
-      error instanceof Error && 'stderr' in error && typeof error.stderr === 'string'
-        ? firstLine(error.stderr)
-        : '';
-    throw new SandboxUnavailableError(
-      stderr || firstLine(error instanceof Error ? error.message : String(error)),
-    );
+    throw new SandboxUnavailableError(checkFailure(error));
   }
   return { settingsPath };
 }

@@ -2,10 +2,13 @@ import { chmod, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // How the fake `srt` behaves:
-// - exec: the readiness check passes and the agent command is run in place of srt;
+// - exec: like the real sandbox, the readiness check `test ! -e <settings file>` passes (the
+//   settings file is hidden), and the agent command is run in place of srt;
 // - fail: every call fails with `bwrap: nope`, as when bubblewrap cannot start;
-// - slow: like exec, but the readiness check takes a second and marks when it began.
-export type FakeSrtMode = 'exec' | 'fail' | 'slow';
+// - slow: like exec, but the readiness check takes a second and marks when it began;
+// - unsandboxed: runs every command as is, so the settings file stays visible to the check.
+// Every mode but fail requires `--settings <file> --`, as srt reads its own options anywhere.
+export type FakeSrtMode = 'exec' | 'fail' | 'slow' | 'unsandboxed';
 
 export interface FakeSrt {
   directory: string;
@@ -23,15 +26,21 @@ export async function writeFakeSrt(directory: string, mode: FakeSrtMode): Promis
     exec: 'exit 0',
     fail: 'exit 1',
     slow: `: > '${marker}'\n  sleep 1\n  exit 0`,
+    unsandboxed: ':',
   }[mode];
   const script = `#!/bin/sh
 (IFS="$(printf '\\t')"; printf '%s\\n' "$*") >> '${log}'
-${mode === 'fail' ? "echo 'bwrap: nope' >&2\nexit 1\n" : ''}if [ "$1" != --settings ] || [ ! -f "$2" ]; then
-  echo 'fake srt: expected --settings <file>' >&2
+${mode === 'fail' ? "echo 'bwrap: nope' >&2\nexit 1\n" : ''}if [ "$1" != --settings ] || [ ! -f "$2" ] || [ "$3" != -- ]; then
+  echo 'fake srt: expected --settings <file> -- <command>' >&2
   exit 64
 fi
-shift 2
-if [ "$1" = sh ] && [ "$2" = -c ]; then
+settings="$2"
+shift 3
+if [ "$1" = test ]; then
+  if [ "$#" != 4 ] || [ "$2" != '!' ] || [ "$3" != -e ] || [ "$4" != "$settings" ]; then
+    echo 'fake srt: unexpected readiness check' >&2
+    exit 65
+  fi
   ${check}
 fi
 exec "$@"

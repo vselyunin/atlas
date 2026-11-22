@@ -257,7 +257,8 @@ describe('prepareSandbox', () => {
       settings,
       stateDir,
       cwd: directory,
-      env: { PATH: pathDirectory },
+      // The system folders let a fake srt run its command; they hold no srt.
+      env: { PATH: `${pathDirectory}:/usr/bin:/bin` },
     });
   }
 
@@ -273,8 +274,21 @@ describe('prepareSandbox', () => {
     expect((await stat(settingsPath)).mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual(settings);
     expect(await srt.calls()).toEqual([
-      ['--settings', settingsPath, 'sh', '-c', '! test -r "$1"', 'sh', stateDir],
+      ['--settings', settingsPath, '--', 'test', '!', '-e', settingsPath],
     ]);
+  });
+
+  it('rejects a sandbox that does not hide the Worker state folder', async () => {
+    const bin = join(directory, 'bin');
+    await mkdir(bin);
+    await writeFakeSrt(bin, 'unsandboxed');
+
+    const attempt = prepare(bin);
+
+    await expect(attempt).rejects.toBeInstanceOf(SandboxUnavailableError);
+    await expect(attempt).rejects.toThrow(
+      /^The agent sandbox could not start, so the agent was not started: the sandbox did not hide the Worker state folder$/,
+    );
   });
 
   it('rewrites the settings file on every start', async () => {
