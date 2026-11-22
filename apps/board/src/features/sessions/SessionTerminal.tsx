@@ -166,12 +166,17 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
         </p>
       )}
       <div className="session-frame">
-        <div ref={container} className={active ? 'session-screen' : 'session-screen idle'} />
-        {!active && (
+        <div
+          ref={container}
+          className={active && connected ? 'session-screen' : 'session-screen idle'}
+        />
+        {!(active && connected) && (
           <p className="session-overlay">
-            {state === 'exited'
-              ? 'This session has ended. Choose Start again to run a new one.'
-              : 'No session is running. Choose Start session to launch the agent.'}
+            {!connected
+              ? 'Not connected to the API. Hide and open the terminal to reconnect.'
+              : state === 'exited'
+                ? 'This session has ended. Choose Start again to run a new one.'
+                : 'No session is running. Choose Start session to launch the agent.'}
           </p>
         )}
       </div>

@@ -77,7 +77,10 @@ export class SessionHub {
         sessionId: taskId,
         projectId: project.id,
         relativePath,
-        prompt: `${task.title}\n\n${task.description}`.trim().slice(0, MAX_SESSION_PROMPT_CHARS),
+        // The label also keeps a title such as "--resume" from reading as an agent CLI option.
+        prompt: `Task: ${task.title}\n\n${task.description}`
+          .trim()
+          .slice(0, MAX_SESSION_PROMPT_CHARS),
         ...size,
       },
     });
