@@ -361,12 +361,19 @@ Read it first; this plan argues from it.
     and, when both are set, `GIT_AUTHOR_NAME`, `GIT_COMMITTER_NAME`,
     `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_EMAIL`.
   - `prepareSandbox` writes the settings file, then proves the sandbox works by
-    running `srt --settings <file> sh -c '! test -r "$1"' sh <stateDir>` with a
-    15 second timeout. A non-zero exit, a timeout or a missing `srt` throws
+    running `srt --settings <file> -- test ! -e <file>` (no shell) with a 15
+    second timeout. The settings file is inside the denied state directory, and
+    a denied folder appears empty inside the sandbox, so exit 0 means the
+    sandbox is effective. A non-zero exit, a timeout or a missing `srt` throws
     `SandboxUnavailableError` whose message is
-    `The agent sandbox could not start, so the agent was not started: <first line of stderr, or the error message>`.
+    `The agent sandbox could not start, so the agent was not started: <detail>`,
+    where the detail is the first line of stderr, or the error message, or
+    `the sandbox did not hide the Worker state folder`.
   - PTY command when sandboxed: file `srt`, arguments
-    `['--settings', settingsPath, command[0], ...agentArgs(...)]`.
+    `['--settings', settingsPath, '--', command[0], ...agentArgs(...)]`. The
+    `--` is required: without it `srt` consumes `-c`, `-d` and `-s` from the
+    agent command. (Corrected during execution after a review finding, and
+    verified against `srt` 0.0.83.)
   - `SANDBOX_ON_NOTICE`:
     `Atlas: agent sandbox on. Writes are limited to this task's worktree.\r\n`
     `SANDBOX_OFF_NOTICE`:
