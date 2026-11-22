@@ -12,6 +12,7 @@ export default defineConfig({
       '/api': {
         target: `http://127.0.0.1:${process.env.ATLAS_API_PORT ?? '4310'}`,
         changeOrigin: true,
+        ws: true,
       },
     },
   },
