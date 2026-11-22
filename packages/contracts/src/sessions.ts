@@ -22,6 +22,7 @@ export const SessionStateSchema = z.enum(['none', 'starting', 'running', 'exited
 
 export const SessionStartPayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   projectId: IdSchema,
   relativePath: z.string().min(1).max(1_024),
   prompt: z.string().max(MAX_SESSION_PROMPT_CHARS),
@@ -30,29 +31,34 @@ export const SessionStartPayloadSchema = z.strictObject({
 
 export const SessionInputPayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   data: z.string().min(1).max(MAX_SESSION_INPUT_CHARS),
 });
 
 export const SessionResizePayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   ...TerminalSizeSchema.shape,
 });
 
-export const SessionStopPayloadSchema = z.strictObject({ sessionId: IdSchema });
+export const SessionStopPayloadSchema = z.strictObject({ sessionId: IdSchema, runId: IdSchema });
 
 export const SessionStartedPayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   worktreePath: z.string(),
   branch: z.string(),
 });
 
 export const SessionOutputPayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   data: z.string().max(MAX_SESSION_OUTPUT_CHARS),
 });
 
 export const SessionExitPayloadSchema = z.strictObject({
   sessionId: IdSchema,
+  runId: IdSchema,
   exitCode: z.int().nullable(),
   message: z.string().nullable(),
 });

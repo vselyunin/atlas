@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { MAX_SESSION_PROMPT_CHARS, PROTOCOL_VERSION } from '@atlas/contracts';
+import {
+  AGENT_SESSION_CAPABILITY,
+  MAX_SESSION_PROMPT_CHARS,
+  PROTOCOL_VERSION,
+} from '@atlas/contracts';
 import type {
   ApiToBoardSessionMessage,
   SessionExit,
@@ -11,7 +15,7 @@ import type {
 import { eq } from 'drizzle-orm';
 import WebSocket from 'ws';
 import type { ApiContext } from '../db/client.js';
-import { tasks } from '../db/schema.js';
+import { tasks, workers } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { getProject } from '../projects/service.js';
 import type { WorkerRegistry } from '../workers/registry.js';
@@ -22,6 +26,7 @@ const REPLAY_LIMIT_CHARS = 400_000;
 
 interface Session {
   workerId: string;
+  runId: string;
   state: Exclude<SessionState, 'none'>;
   branch: string | null;
   worktreePath: string | null;
@@ -69,12 +74,26 @@ export class SessionHub {
       );
     }
     const { workerId, relativePath } = project.repository;
+    const worker = this.context.db.select().from(workers).where(eq(workers.id, workerId)).get();
+    if (
+      worker?.availability === 'online' &&
+      !worker.capabilities.includes(AGENT_SESSION_CAPABILITY)
+    ) {
+      throw new ApiError(
+        409,
+        'sessions_unsupported',
+        'The project worker is too old to run agent sessions',
+      );
+    }
+    // A fresh id per start lets late reports about an earlier run be told apart and ignored.
+    const runId = randomUUID();
     const sent = this.registry.send(workerId, {
       protocolVersion: PROTOCOL_VERSION,
       messageId: randomUUID(),
       type: 'session.start',
       payload: {
         sessionId: taskId,
+        runId,
         projectId: project.id,
         relativePath,
         // The label also keeps a title such as "--resume" from reading as an agent CLI option.
@@ -87,6 +106,7 @@ export class SessionHub {
     if (!sent) throw new ApiError(503, 'worker_unavailable', 'The project worker is offline');
     this.sessions.set(taskId, {
       workerId,
+      runId,
       state: 'starting',
       branch: null,
       worktreePath: null,
@@ -99,47 +119,50 @@ export class SessionHub {
   }
 
   input(taskId: string, data: string): void {
-    this.forward(taskId, (workerId) =>
+    this.forward(taskId, (workerId, runId) =>
       this.registry.send(workerId, {
         protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         type: 'session.input',
-        payload: { sessionId: taskId, data },
+        payload: { sessionId: taskId, runId, data },
       }),
     );
   }
 
   resize(taskId: string, size: TerminalSize): void {
-    this.forward(taskId, (workerId) =>
+    this.forward(taskId, (workerId, runId) =>
       this.registry.send(workerId, {
         protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         type: 'session.resize',
-        payload: { sessionId: taskId, ...size },
+        payload: { sessionId: taskId, runId, ...size },
       }),
     );
   }
 
   stop(taskId: string): void {
-    this.forward(taskId, (workerId) =>
+    this.forward(taskId, (workerId, runId) =>
       this.registry.send(workerId, {
         protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         type: 'session.stop',
-        payload: { sessionId: taskId },
+        payload: { sessionId: taskId, runId },
       }),
     );
   }
 
-  onStarted(workerId: string, { sessionId, branch, worktreePath }: SessionStarted['payload']) {
-    const session = this.owned(workerId, sessionId);
+  onStarted(
+    workerId: string,
+    { sessionId, runId, branch, worktreePath }: SessionStarted['payload'],
+  ) {
+    const session = this.owned(workerId, sessionId, runId);
     if (!session) return;
     Object.assign(session, { state: 'running', branch, worktreePath });
     this.broadcast(sessionId, this.snapshot(sessionId));
   }
 
-  onOutput(workerId: string, { sessionId, data }: SessionOutput['payload']) {
-    const session = this.owned(workerId, sessionId);
+  onOutput(workerId: string, { sessionId, runId, data }: SessionOutput['payload']) {
+    const session = this.owned(workerId, sessionId, runId);
     if (!session) return;
     session.chunks.push(data);
     session.size += data.length;
@@ -149,22 +172,22 @@ export class SessionHub {
     this.broadcast(sessionId, { type: 'output', data });
   }
 
-  onExit(workerId: string, { sessionId, exitCode, message }: SessionExit['payload']) {
-    const session = this.owned(workerId, sessionId);
+  onExit(workerId: string, { sessionId, runId, exitCode, message }: SessionExit['payload']) {
+    const session = this.owned(workerId, sessionId, runId);
     if (!session || session.state === 'exited') return;
     Object.assign(session, { state: 'exited', exitCode, message });
     this.broadcast(sessionId, this.snapshot(sessionId));
   }
 
-  private owned(workerId: string, taskId: string) {
+  private owned(workerId: string, taskId: string, runId: string) {
     const session = this.sessions.get(taskId);
-    return session?.workerId === workerId ? session : undefined;
+    return session?.workerId === workerId && session.runId === runId ? session : undefined;
   }
 
-  private forward(taskId: string, send: (workerId: string) => boolean) {
+  private forward(taskId: string, send: (workerId: string, runId: string) => boolean) {
     const session = this.sessions.get(taskId);
     if (!session || session.state === 'exited') return;
-    if (!send(session.workerId)) {
+    if (!send(session.workerId, session.runId)) {
       throw new ApiError(503, 'worker_unavailable', 'The project worker is offline');
     }
   }

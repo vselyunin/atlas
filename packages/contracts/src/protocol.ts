@@ -10,7 +10,7 @@ import {
   SessionStartedPayloadSchema,
   SessionStopPayloadSchema,
 } from './sessions.js';
-import { REPOSITORY_INIT_CAPABILITY } from './workers.js';
+import { AGENT_SESSION_CAPABILITY, REPOSITORY_INIT_CAPABILITY } from './workers.js';
 
 export const WORKER_CONNECT_PATH = `${API_BASE_PATH}/workers/connect`;
 export const PROTOCOL_VERSION = 1;
@@ -35,7 +35,11 @@ export const WorkerRegisterSchema = z.strictObject({
     workerId: IdSchema,
     name: NameSchema,
     workspaceRoot: z.string(),
-    capabilities: z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY)]),
+    // Workers that predate agent sessions advertise only repository initialization.
+    capabilities: z.union([
+      z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY)]),
+      z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY), z.literal(AGENT_SESSION_CAPABILITY)]),
+    ]),
   }),
 });
 

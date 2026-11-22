@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { mkdir, stat } from 'node:fs/promises';
-import { basename, dirname, resolve } from 'node:path';
+import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import pty from 'node-pty';
 import type { IPty } from 'node-pty';
@@ -15,6 +15,8 @@ import type {
 import { resolveTarget } from '../repositories/paths.js';
 
 // Spike: one terminal session per task, each in its own Git worktree. Nothing survives a restart.
+
+const STOP_GRACE_MS = 5_000;
 
 const run = promisify(execFile);
 const succeeds = (promise: Promise<unknown>) =>
@@ -32,6 +34,14 @@ interface Session {
   terminal: IPty;
   path: string;
   branch: string;
+  // The API's id for its current view of this session; replaced when the API attaches again.
+  runId: string;
+  killTimer?: NodeJS.Timeout;
+}
+
+interface PendingStart {
+  runId: string;
+  cancelled: boolean;
 }
 
 function childEnvironment(root: string): Record<string, string> {
@@ -45,12 +55,20 @@ function childEnvironment(root: string): Record<string, string> {
   return env;
 }
 
+async function requireRealDirectory(path: string, label: string) {
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || (await realpath(path)) !== path) {
+    throw new Error(`${label} must be a real directory, not a link`);
+  }
+}
+
 async function ensureWorktree(root: string, repository: string, payload: SessionStartPayload) {
   const git = async (cwd: string, args: string[]) =>
     (await run('git', args, { cwd, timeout: 30_000, env: childEnvironment(root) })).stdout.trim();
   const isTopLevel = async (directory: string) =>
     (await git(directory, ['rev-parse', '--show-toplevel']).catch(() => null)) === directory;
 
+  await requireRealDirectory(repository, 'The project folder');
   if (!(await isTopLevel(repository))) {
     throw new Error('The project folder is not its own Git repository');
   }
@@ -70,16 +88,34 @@ async function ensureWorktree(root: string, repository: string, payload: Session
     ]);
     await git(repository, ['update-ref', 'HEAD', commit]);
   }
-  const key = payload.sessionId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8) || 'task';
-  const branch = `atlas/task-${key}`;
-  const path = resolve(root, '.atlas-worktrees', payload.relativePath.replaceAll('/', '__'), key);
-  if (await succeeds(stat(path))) {
+
+  const base = resolve(root, '.atlas-worktrees');
+  // Encoding keeps nested project paths such as "a/b" distinct from a project named "a__b".
+  const projectDirectory = resolve(base, encodeURIComponent(payload.relativePath));
+  await mkdir(projectDirectory, { recursive: true });
+  await requireRealDirectory(base, 'The worktree folder');
+  await requireRealDirectory(projectDirectory, 'The project worktree folder');
+
+  const reuse = async (path: string, branch: string) => {
+    if (!(await succeeds(stat(path)))) return null;
     if (!(await isTopLevel(path))) {
       throw new Error(`The task folder exists but is not a Git worktree: ${path}`);
     }
     return { path, branch };
-  }
-  await mkdir(dirname(path), { recursive: true });
+  };
+  const key = payload.sessionId.replace(/[^a-zA-Z0-9-]/g, '') || 'task';
+  const branch = `atlas/task-${key}`;
+  const path = resolve(projectDirectory, key);
+  // Worktrees made before task folders used the full task id keep working.
+  const shortKey = key.replaceAll('-', '').slice(0, 8);
+  const existing =
+    (await reuse(path, branch)) ??
+    (await reuse(
+      resolve(base, payload.relativePath.replaceAll('/', '__'), shortKey),
+      `atlas/task-${shortKey}`,
+    ));
+  if (existing) return existing;
+
   // Forget worktrees whose folders were deleted by hand, so the branch can be checked out again.
   await git(repository, ['worktree', 'prune']);
   const exists = await succeeds(
@@ -94,8 +130,10 @@ async function ensureWorktree(root: string, repository: string, payload: Session
 
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
-  private readonly starting = new Set<string>();
+  private readonly pending = new Map<string, PendingStart>();
   private readonly command: string[];
+  private queue: Promise<void> = Promise.resolve();
+  private stopped = false;
 
   constructor(
     private readonly root: string,
@@ -105,22 +143,36 @@ export class SessionManager {
     this.command = command.split(/\s+/).filter(Boolean);
   }
 
-  async start(payload: SessionStartPayload): Promise<void> {
-    const { sessionId } = payload;
+  start(payload: SessionStartPayload): Promise<void> {
+    const { sessionId, runId } = payload;
     const running = this.sessions.get(sessionId);
     if (running) {
       // The API forgot this session, for example after its own restart; let it attach again.
+      running.runId = runId;
       this.emit({
         type: 'session.started',
-        payload: { sessionId, worktreePath: running.path, branch: running.branch },
+        payload: { sessionId, runId, worktreePath: running.path, branch: running.branch },
       });
-      return;
+      return Promise.resolve();
     }
-    if (this.starting.has(sessionId)) return;
-    this.starting.add(sessionId);
+    if (this.stopped || this.pending.has(sessionId)) return Promise.resolve();
+    const pending: PendingStart = { runId, cancelled: false };
+    this.pending.set(sessionId, pending);
+    // One start at a time, so two tasks cannot race while preparing the same repository.
+    this.queue = this.queue.then(() => this.launch(payload, pending));
+    return this.queue;
+  }
+
+  private async launch(payload: SessionStartPayload, pending: PendingStart): Promise<void> {
+    const { sessionId, runId } = payload;
+    const exit = (message: string) =>
+      this.emit({ type: 'session.exit', payload: { sessionId, runId, exitCode: null, message } });
     try {
+      const abandoned = () => this.stopped || pending.cancelled;
+      if (abandoned()) return exit('The session was stopped before it started');
       const repository = await resolveTarget(this.root, payload.relativePath);
       const { path, branch } = await ensureWorktree(this.root, repository, payload);
+      if (abandoned()) return exit('The session was stopped before it started');
       const [file = 'claude', ...args] = this.command;
       if (payload.prompt && ['claude', 'codex'].includes(basename(file))) {
         // A leading dash would be read as a command-line option of the agent.
@@ -133,62 +185,80 @@ export class SessionManager {
         cwd: path,
         env: childEnvironment(this.root),
       });
-      this.sessions.set(sessionId, { terminal, path, branch });
+      const session: Session = { terminal, path, branch, runId };
+      this.sessions.set(sessionId, session);
       this.emit({
         type: 'session.started',
-        payload: { sessionId, worktreePath: path, branch },
+        payload: { sessionId, runId, worktreePath: path, branch },
       });
       terminal.onData((data) => {
         for (let offset = 0; offset < data.length; offset += MAX_SESSION_OUTPUT_CHARS) {
           this.emit({
             type: 'session.output',
-            payload: { sessionId, data: data.slice(offset, offset + MAX_SESSION_OUTPUT_CHARS) },
+            payload: {
+              sessionId,
+              runId: session.runId,
+              data: data.slice(offset, offset + MAX_SESSION_OUTPUT_CHARS),
+            },
           });
         }
       });
       terminal.onExit(({ exitCode }) => {
-        if (this.sessions.get(sessionId)?.terminal === terminal) this.sessions.delete(sessionId);
-        this.emit({ type: 'session.exit', payload: { sessionId, exitCode, message: null } });
+        clearTimeout(session.killTimer);
+        if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
+        this.emit({
+          type: 'session.exit',
+          payload: { sessionId, runId: session.runId, exitCode, message: null },
+        });
       });
     } catch (error) {
-      this.emit({
-        type: 'session.exit',
-        payload: {
-          sessionId,
-          exitCode: null,
-          message: error instanceof Error ? error.message : 'Could not start the session',
-        },
-      });
+      exit(error instanceof Error ? error.message : 'Could not start the session');
     } finally {
-      this.starting.delete(sessionId);
+      this.pending.delete(sessionId);
     }
   }
 
-  input(sessionId: string, data: string): void {
+  input(sessionId: string, runId: string, data: string): void {
     const session = this.sessions.get(sessionId);
     if (session) session.terminal.write(data);
-    else if (!this.starting.has(sessionId)) this.reportMissing(sessionId);
+    else if (!this.pending.has(sessionId)) this.reportMissing(sessionId, runId);
   }
 
   resize(sessionId: string, { cols, rows }: TerminalSize): void {
     this.sessions.get(sessionId)?.terminal.resize(cols, rows);
   }
 
-  stop(sessionId: string): void {
+  stop(sessionId: string, runId: string): void {
     const session = this.sessions.get(sessionId);
-    if (session) session.terminal.kill();
-    else if (!this.starting.has(sessionId)) this.reportMissing(sessionId);
+    const pending = this.pending.get(sessionId);
+    if (session) this.kill(session);
+    else if (pending) pending.cancelled = true;
+    else this.reportMissing(sessionId, runId);
   }
 
   stopAll(): void {
-    for (const session of this.sessions.values()) session.terminal.kill();
-    this.sessions.clear();
+    this.stopped = true;
+    for (const pending of this.pending.values()) pending.cancelled = true;
+    for (const session of this.sessions.values()) this.kill(session);
   }
 
-  private reportMissing(sessionId: string) {
+  private kill(session: Session) {
+    session.terminal.kill();
+    // An agent that ignores the hangup is killed outright after a grace period.
+    session.killTimer ??= setTimeout(() => {
+      try {
+        session.terminal.kill('SIGKILL');
+      } catch {
+        // The process already exited.
+      }
+    }, STOP_GRACE_MS);
+    session.killTimer.unref();
+  }
+
+  private reportMissing(sessionId: string, runId: string) {
     this.emit({
       type: 'session.exit',
-      payload: { sessionId, exitCode: null, message: 'The session is no longer running' },
+      payload: { sessionId, runId, exitCode: null, message: 'The session is no longer running' },
     });
   }
 }
