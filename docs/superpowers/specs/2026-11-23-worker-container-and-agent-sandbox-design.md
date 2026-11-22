@@ -391,6 +391,23 @@ UI works on the Board with permission prompts off.
 - Anyone running the image elsewhere needs the seccomp profile file as well.
 - Sessions and their output still live in memory only.
 
+## Deferred: isolating agent logins
+
+The user decided to keep one shared login folder this round and research the
+login topic separately before changing it. This design must not attempt it. What
+was learned, for that later work:
+
+- A copy of the login folder per task would stop cross-task tampering, but
+  several copies refreshing one login may invalidate each other. Not tested.
+- An empty settings folder per task (`CLAUDE_CONFIG_DIR`) gives an agent a
+  clean, logged-out state; this was seen working. A long-lived token from
+  `claude setup-token`, handed to each agent at start, would then log it in
+  without shared writable state. That step was not tested, and a leaked
+  long-lived token stays usable far longer than a normal access token.
+- A credential proxy run by the Worker, so the agent never holds the token, is
+  the strongest option. It is known to suit a pay-per-use API key; whether it
+  works with a subscription login is unknown.
+
 ## Left to the builder
 
 - File layout, command names, setting names, and whether `srt` is used as a
