@@ -9,6 +9,7 @@ import { MAX_SESSION_OUTPUT_CHARS } from '@atlas/contracts';
 import { prepareConfig } from '../src/config.js';
 import { SessionManager } from '../src/sessions/manager.js';
 import type { SessionEvent } from '../src/sessions/manager.js';
+import { SANDBOX_OFF_NOTICE } from '../src/sessions/sandbox.js';
 import { startPayload } from './support/sessions.js';
 
 // A real pty hands over small reads, so a single oversized read needs a fake terminal.
@@ -61,9 +62,10 @@ it('splits one oversized terminal read into chunks within the limit', async () =
   const data = 'y'.repeat(MAX_SESSION_OUTPUT_CHARS * 2 + 5);
   terminal.emitData?.(data);
 
-  const chunks = events.flatMap((event) =>
+  const [notice, ...chunks] = events.flatMap((event) =>
     event.type === 'session.output' ? [event.payload] : [],
   );
+  expect(notice?.data).toBe(SANDBOX_OFF_NOTICE);
   expect(chunks.map((chunk) => chunk.data.length)).toEqual([
     MAX_SESSION_OUTPUT_CHARS,
     MAX_SESSION_OUTPUT_CHARS,
@@ -71,4 +73,6 @@ it('splits one oversized terminal read into chunks within the limit', async () =
   ]);
   expect(chunks.map((chunk) => chunk.data).join('')).toBe(data);
   expect(chunks.every((chunk) => chunk.runId === payload.runId)).toBe(true);
+  // Removes the manager's Git excludes file.
+  manager.stopAll();
 });

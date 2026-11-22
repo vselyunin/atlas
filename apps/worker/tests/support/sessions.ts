@@ -43,11 +43,21 @@ export function startPayload(
   };
 }
 
-export async function createHarness(
-  options: { agentArgs?: string[]; stopGraceMs?: number } = {},
-): Promise<Harness> {
+export interface HarnessOptions {
+  agentArgs?: string[];
+  stopGraceMs?: number;
+  sandbox?: 'required' | 'off';
+  // Put first on PATH for the Worker and the processes it starts, for example to supply a fake srt.
+  pathPrefix?: string;
+}
+
+export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
   // A temporary directory on the Linux filesystem keeps Git and the pty behavior realistic.
   const directory = await realpath(await mkdtemp(join(tmpdir(), 'atlas-sessions-')));
+  const originalPath = process.env.PATH;
+  if (options.pathPrefix !== undefined) {
+    process.env.PATH = `${options.pathPrefix}:${originalPath ?? ''}`;
+  }
   const config = prepareConfig({
     apiUrl: 'ws://127.0.0.1:1/api/v1/workers/connect',
     token: 'test-token',
@@ -57,7 +67,7 @@ export async function createHarness(
     stateDir: join(directory, 'state'),
     agent: {
       command: [process.execPath, agentPath, ...(options.agentArgs ?? [])],
-      sandbox: 'off',
+      sandbox: options.sandbox ?? 'off',
     },
   });
 
@@ -140,6 +150,7 @@ export async function createHarness(
             });
         }
       } finally {
+        if (options.pathPrefix !== undefined) process.env.PATH = originalPath;
         await rm(directory, { recursive: true, force: true });
       }
     },

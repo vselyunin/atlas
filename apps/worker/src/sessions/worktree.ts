@@ -20,6 +20,11 @@ export interface Worktree {
   commonDir: string;
 }
 
+// The task id reduced to characters that are safe in folder, file and branch names.
+export function sessionKey(sessionId: string): string {
+  return sessionId.replace(/[^a-zA-Z0-9-]/g, '') || 'task';
+}
+
 export function childEnvironment(root: string): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [name, value] of Object.entries(process.env)) {
@@ -89,7 +94,7 @@ export async function ensureWorktree(
     }
     return describe(path, branch);
   };
-  const key = payload.sessionId.replace(/[^a-zA-Z0-9-]/g, '') || 'task';
+  const key = sessionKey(payload.sessionId);
   const branch = `atlas/task-${key}`;
   const path = resolve(projectDirectory, key);
   // Worktrees made before task folders used the full task id keep working.

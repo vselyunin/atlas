@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MAX_SESSION_OUTPUT_CHARS } from '@atlas/contracts';
+import type { SessionStartPayload } from '@atlas/contracts';
+import { SANDBOX_OFF_NOTICE, SANDBOX_ON_NOTICE } from '../src/sessions/sandbox.js';
+import { writeFakeSrt } from './support/sandbox.js';
+import type { FakeSrtMode } from './support/sandbox.js';
 import { createHarness, startPayload } from './support/sessions.js';
-import type { Harness } from './support/sessions.js';
+import type { Harness, HarnessOptions } from './support/sessions.js';
 
 const run = promisify(execFile);
+const agentPath = fileURLToPath(new URL('./fixtures/agent.mjs', import.meta.url));
 
 let harness: Harness | undefined;
 
@@ -246,4 +255,102 @@ describe('sessions with a stand-in agent', () => {
     expect(Math.max(...chunks)).toBeLessThanOrEqual(MAX_SESSION_OUTPUT_CHARS);
     expect(chunks.reduce((sum, size) => sum + size, 0)).toBeGreaterThan(MAX_SESSION_OUTPUT_CHARS);
   });
+});
+
+describe('sessions in the agent sandbox', () => {
+  let bin: string | undefined;
+
+  afterEach(async () => {
+    if (bin) await rm(bin, { recursive: true, force: true });
+    bin = undefined;
+  });
+
+  async function setupWithSrt(mode: FakeSrtMode, options: HarnessOptions = {}) {
+    bin = await realpath(await mkdtemp(join(tmpdir(), 'atlas-fake-srt-')));
+    const srt = await writeFakeSrt(bin, mode);
+    const h = await setup({ sandbox: 'required', pathPrefix: bin, ...options });
+    await h.initRepository('app');
+    return { h, srt };
+  }
+
+  const outputs = (h: Harness) =>
+    h.events.flatMap((event) => (event.type === 'session.output' ? [event.payload.data] : []));
+
+  it('starts the agent through srt and says the sandbox is on first', async () => {
+    const { h, srt } = await setupWithSrt('exec');
+    const payload = startPayload(randomUUID(), 'app', { prompt: 'do the thing' });
+
+    await h.manager.start(payload);
+    await h.waitForOutput(payload.sessionId, 'READY');
+    await h.waitForOutput(payload.sessionId, 'ARGS []');
+
+    expect(h.events[0]?.type).toBe('session.started');
+    expect(outputs(h)[0]).toBe(SANDBOX_ON_NOTICE);
+    const settingsPath = join(h.stateDir, 'sessions', `${payload.sessionId}.json`);
+    expect(await srt.calls()).toEqual([
+      ['--settings', settingsPath, 'sh', '-c', '! test -r "$1"', 'sh', h.stateDir],
+      ['--settings', settingsPath, process.execPath, agentPath],
+    ]);
+  });
+
+  it('does not start the agent when the sandbox cannot start', async () => {
+    const { h } = await setupWithSrt('fail');
+    const payload = startPayload(randomUUID(), 'app');
+
+    await h.manager.start(payload);
+
+    const exit = await h.waitFor('session.exit', payload.sessionId);
+    expect(exit.payload).toEqual({
+      sessionId: payload.sessionId,
+      runId: payload.runId,
+      exitCode: null,
+      message: 'The agent sandbox could not start, so the agent was not started: bwrap: nope',
+    });
+    expect(h.events.map((event) => event.type)).toEqual(['session.exit']);
+    expect(h.output(payload.sessionId)).not.toContain('READY');
+  });
+
+  it('says the sandbox is off and does not use srt when it is off', async () => {
+    const { h, srt } = await setupWithSrt('exec', { sandbox: 'off' });
+    const payload = startPayload(randomUUID(), 'app');
+
+    await h.manager.start(payload);
+    await h.waitForOutput(payload.sessionId, 'READY');
+
+    expect(outputs(h)[0]).toBe(SANDBOX_OFF_NOTICE);
+    expect(await srt.calls()).toEqual([]);
+  });
+
+  for (const [name, stop] of [
+    [
+      'stop',
+      (h: Harness, payload: SessionStartPayload) =>
+        h.manager.stop(payload.sessionId, payload.runId),
+    ],
+    ['stopAll()', (h: Harness) => h.manager.stopAll()],
+  ] as const) {
+    it(`starts nothing after ${name} during the sandbox check`, async () => {
+      const { h, srt } = await setupWithSrt('slow');
+      const payload = startPayload(randomUUID(), 'app');
+
+      const starting = h.manager.start(payload);
+      await vi.waitFor(
+        async () => {
+          expect(await srt.checkStarted()).toBe(true);
+        },
+        { timeout: 10_000, interval: 20 },
+      );
+      stop(h, payload);
+      await starting;
+
+      const exit = await h.waitFor('session.exit', payload.sessionId);
+      expect(exit.payload).toMatchObject({
+        runId: payload.runId,
+        exitCode: null,
+        message: 'The session was stopped before it started',
+      });
+      expect(h.events.map((event) => event.type)).toEqual(['session.exit']);
+      expect(await srt.calls()).toHaveLength(1);
+    });
+  }
 });

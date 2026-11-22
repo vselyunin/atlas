@@ -1,4 +1,6 @@
-import { basename } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import pty from 'node-pty';
 import type { IPty } from 'node-pty';
 import { MAX_SESSION_OUTPUT_CHARS } from '@atlas/contracts';
@@ -10,8 +12,17 @@ import type {
   TerminalSize,
 } from '@atlas/contracts';
 import { resolveTarget } from '../repositories/paths.js';
-import { childEnvironment, ensureWorktree } from './worktree.js';
-import type { WorkerConfig } from '../config.js';
+import { agentArgs, agentProfile } from './agents.js';
+import {
+  SANDBOX_OFF_NOTICE,
+  SANDBOX_ON_NOTICE,
+  agentEnvironment,
+  prepareSandbox,
+  sandboxSettings,
+  writeExcludesFile,
+} from './sandbox.js';
+import { ensureWorktree, sessionKey } from './worktree.js';
+import type { AgentSettings, WorkerConfig } from '../config.js';
 
 // Spike: one terminal session per task, each in its own Git worktree. Nothing survives a restart.
 
@@ -38,10 +49,12 @@ export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly pending = new Map<string, PendingStart>();
   private readonly root: string;
-  private readonly command: string[];
+  private readonly stateDir: string;
+  private readonly agent: AgentSettings;
   private readonly stopGraceMs: number;
   private queue: Promise<void> = Promise.resolve();
   private stopped = false;
+  private excludes: Promise<string> | undefined;
 
   constructor(
     config: WorkerConfig,
@@ -49,7 +62,8 @@ export class SessionManager {
     options: { stopGraceMs?: number } = {},
   ) {
     this.root = config.root;
-    this.command = config.agent.command;
+    this.stateDir = config.stateDir;
+    this.agent = config.agent;
     this.stopGraceMs = options.stopGraceMs ?? 5_000;
   }
 
@@ -77,29 +91,57 @@ export class SessionManager {
     const { sessionId, runId } = payload;
     const exit = (message: string) =>
       this.emit({ type: 'session.exit', payload: { sessionId, runId, exitCode: null, message } });
+    const stoppedEarly = 'The session was stopped before it started';
     try {
       const abandoned = () => this.stopped || pending.cancelled;
-      if (abandoned()) return exit('The session was stopped before it started');
+      if (abandoned()) return exit(stoppedEarly);
       const repository = await resolveTarget(this.root, payload.relativePath);
-      const { path, branch } = await ensureWorktree(this.root, repository, payload);
-      if (abandoned()) return exit('The session was stopped before it started');
-      const [file = 'claude', ...args] = this.command;
-      if (payload.prompt && ['claude', 'codex'].includes(basename(file))) {
-        // A leading dash would be read as a command-line option of the agent.
-        args.push(payload.prompt.startsWith('-') ? ` ${payload.prompt}` : payload.prompt);
+      const worktree = await ensureWorktree(this.root, repository, payload);
+      const { path, branch } = worktree;
+      if (abandoned()) return exit(stoppedEarly);
+      const env = agentEnvironment(this.root, this.agent, await this.excludesFile());
+      if (abandoned()) return exit(stoppedEarly);
+      const sandboxed = this.agent.sandbox === 'required';
+      const [agentFile = 'claude'] = this.agent.command;
+      const profile = agentProfile(this.agent.command);
+      const args = agentArgs(profile, this.agent.command, payload.prompt, sandboxed);
+      let file = agentFile;
+      if (sandboxed) {
+        const { settingsPath } = await prepareSandbox({
+          sessionKey: sessionKey(sessionId),
+          settings: sandboxSettings({
+            worktree,
+            stateDir: this.stateDir,
+            home: homedir(),
+            profile,
+            allowedDomains: this.agent.allowedDomains,
+          }),
+          stateDir: this.stateDir,
+          cwd: path,
+          env,
+        });
+        if (abandoned()) return exit(stoppedEarly);
+        // The agent and its arguments stay separate arguments, so no shell reads the prompt.
+        file = 'srt';
+        args.unshift('--settings', settingsPath, agentFile);
       }
       const terminal = pty.spawn(file, args, {
         name: 'xterm-256color',
         cols: payload.cols,
         rows: payload.rows,
         cwd: path,
-        env: childEnvironment(this.root),
+        env,
       });
       const session: Session = { terminal, path, branch, runId };
       this.sessions.set(sessionId, session);
       this.emit({
         type: 'session.started',
         payload: { sessionId, runId, worktreePath: path, branch },
+      });
+      // Said before any agent output, so the user always knows whether the sandbox is on.
+      this.emit({
+        type: 'session.output',
+        payload: { sessionId, runId, data: sandboxed ? SANDBOX_ON_NOTICE : SANDBOX_OFF_NOTICE },
       });
       terminal.onData((data) => {
         for (let offset = 0; offset < data.length; offset += MAX_SESSION_OUTPUT_CHARS) {
@@ -150,6 +192,19 @@ export class SessionManager {
     this.stopped = true;
     for (const pending of this.pending.values()) pending.cancelled = true;
     for (const session of this.sessions.values()) this.kill(session);
+    // Nothing starts after this, so the excludes file can go with the Worker.
+    void this.excludes
+      ?.then((path) => rm(dirname(path), { recursive: true, force: true }))
+      .catch(() => {});
+  }
+
+  // Written once per manager, outside the Worker state directory the agent cannot read.
+  private excludesFile(): Promise<string> {
+    this.excludes ??= writeExcludesFile().catch((error: unknown) => {
+      this.excludes = undefined;
+      throw error;
+    });
+    return this.excludes;
   }
 
   private kill(session: Session) {
