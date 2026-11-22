@@ -15,7 +15,7 @@ Use `pnpm dev` for the local stack and `pnpm --filter @atlas/<package> <command>
 
 There is no mandatory TDD. Add useful new tests as needed. Existing tests require explicit user permission to modify. This includes deleting, skipping or disabling tests, weakening assertions, updating snapshots or expected fixtures, and changing configuration to exclude or bypass coverage. Identify the affected files, exact changes, and why they are necessary when requesting permission. A failure alone provides no authorization. Fix production behavior where appropriate and report remaining test failures.
 
-Use read-only lint and format checks. Keep protected tests out of default formatting writes and avoid blanket lint autofix. Before a commit, review the diff and confirm applicable checks. Never amend or rewrite history without authorization.
+Use read-only lint and format checks. Keep protected tests out of default formatting writes and avoid blanket lint autofix. Commit the finished changes for each user request without waiting to be asked. Before a commit, review the diff and confirm applicable checks. Never amend or rewrite history without authorization.
 
 Test protection also covers startup helpers, test configuration and syntax-only or formatting changes. Permission applies only to the specific files and changes approved; reuse that permission without asking again, but do not extend it to unrelated edits.
 
