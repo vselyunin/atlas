@@ -161,6 +161,8 @@ for (const { name, command, args } of apps) {
 }
 process.on('SIGINT', () => stop());
 process.on('SIGTERM', () => stop());
+// A closed terminal sends SIGHUP; the detached children would not receive it.
+process.on('SIGHUP', () => stop());
 console.log(`Atlas Board: ${env.ATLAS_BOARD_ORIGIN}`);
 console.log(`Repository workspace: ${env.ATLAS_WORKSPACE_ROOT}`);
 console.log(
