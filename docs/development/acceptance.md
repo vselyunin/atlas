@@ -20,10 +20,49 @@ records responsibility; it does not start an agent or terminal session.
 Run `pnpm check` and `pnpm test:e2e` as described in the README. Browser tests use
 temporary data and separate ports, leaving the personal workspace untouched.
 
+### Worker container and agent sandbox
+
+At the time of writing `pnpm check` runs 60 contract, 81 Worker, 28 API and 41 Board
+tests, plus 10 integration tests. They cover, with a stand-in agent and the sandbox off:
+
+- session message schemas and limits, and the two accepted capability lists;
+- Worker sessions and worktrees with real Git and a real PTY, the sandbox settings and
+  agent arguments, required mode refusing to start without the sandbox, off mode running
+  unwrapped, the Worker lock, the seccomp profile and the Worker configuration;
+- the API session hub and socket, and the Board session section and terminal;
+- API and Worker together through the Board socket: start, output, input, reattach,
+  stop and reattach after an API restart.
+
+`pnpm test:docker` is a separate group of 6 tests. It needs Docker, no agent login, and is
+not part of `pnpm check`. It builds the image and registers the containerized Worker, runs
+a stand-in agent through the Board socket with the sandbox required, checks what the
+sandboxed agent can and cannot write, read and reach, checks that `git add -A` works, and
+checks that the default seccomp profile makes a required-mode session fail with no agent
+started. The Docker group was not run by the author of this document.
+
+### Manual checks with a real logged-in Claude
+
+Run on 2026-11-23 with `pnpm dev` and the login in the `atlas-agent-home` volume.
+
+| Check                                                                | Result (2026-11-23)                                                                     |
+| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Session starts in the container and shows "Atlas: agent sandbox on…" | Passed, after a fix: Claude first exited with a read-only error creating `/tmp/claude`. |
+| Folder-trust question appears and can be answered on the Board       | Passed.                                                                                 |
+| Permission-bypass warning appears on the Board                       | Appears; acceptance pending the user.                                                   |
+| Agent edits and commits in its worktree with `git add -A`            | not yet run                                                                             |
+| Agent cannot write `/tmp/outside.txt`                                | not yet run                                                                             |
+| Stop ends the session                                                | not yet run                                                                             |
+
+Codex was not checked under the sandbox and is unverified.
+
 ## Review and test permissions
 
-Implementation was reviewed by the implementing agent. An independent agent
-review was attempted but unavailable because the service usage limit was reached.
+The container and sandbox work was split into 11 tasks. Each task had an independent
+task review by a separate reviewer agent, covering spec compliance and quality; Tasks 4,
+7, 9 and 10 needed fix rounds. The implementers' own checks were self-review. A
+whole-branch review is pending at the time of writing. Earlier work was reviewed by the
+implementing agent only; an independent agent review of it was attempted but unavailable
+because the service usage limit was reached.
 
 The user explicitly approved these changes to existing tests and test helpers:
 
