@@ -11,10 +11,11 @@ nvm install
 nvm use
 corepack enable
 pnpm install --frozen-lockfile
+pnpm worker:login   # once, to log the agent in
 pnpm dev
 ```
 
-Open [Atlas](http://localhost:5173) in your Windows browser. `pnpm dev` starts the Board, API and Worker, generates a local worker token, and preserves data in the ignored `.atlas/` folder. No environment file is required for the default local setup. Ctrl+C stops all three apps.
+Open [Atlas](http://localhost:5173) in your Windows browser. `pnpm dev` needs Docker in WSL: it starts the Board and API natively and the Worker in a Docker container, generates a local worker token, and preserves data in the ignored `.atlas/` folder. Run `pnpm worker:login` once before the first session so the agent is logged in. For Board or API work without Docker, `pnpm dev:web` starts only the Board and API. No environment file is required for the default local setup. Ctrl+C stops all three apps. See [local setup](docs/development/local-setup.md) for Docker and the agent sandbox.
 
 Create a project using an existing Git URL or a new local repository, select a version, and add tasks to Backlog. Drag cards between columns or change status in task details. Assignments only record responsibility.
 

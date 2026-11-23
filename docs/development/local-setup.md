@@ -34,17 +34,20 @@ Default local state is in the ignored `.atlas/` directory:
 - `atlas.sqlite`: projects, versions, tasks and operations.
 - `projects/`: new project repositories created by the Worker.
 - `worker/`: Worker lock and durable command journal. The lock file holds `<pid> <token>`;
-  a lock left by a container that was killed hard is taken over on the next start.
+  a lock left by a container that was killed hard is taken over on the next start. The lock
+  keeps two Workers apart only when they share a PID namespace; it does not keep a native
+  Worker and the container Worker apart (see "What the sandbox does not protect").
 - `worker-token`: secret shared by the local API and Worker.
 
 Ctrl+C stops all services, including the container; it does not erase data or
 repositories. Restart with `pnpm dev`. Do not run two copies of the same Worker
 identity/state directory.
 
-Closing the terminal that runs `pnpm dev`, instead of pressing Ctrl+C, can leave the API,
-Board and the `atlas-worker` container running. Clean up with `docker rm -f atlas-worker`
-and stop the leftover node processes; check their ownership first. Do not start a second
-stack while they run.
+Closing the terminal that runs `pnpm dev` stops the stack the same way as Ctrl+C. Only if the
+launcher itself is killed hard (for example `kill -9`) can the API, Board and the
+`atlas-worker` container be left running; then clean up with `docker rm -f atlas-worker` and
+stop the leftover node processes after checking their ownership. Do not start a second stack
+while they run.
 
 ## Docker in WSL
 
@@ -67,7 +70,8 @@ must log in again. All agents of the Worker share this login.
 
 The Worker wraps every agent in the sandbox runtime `@anthropic-ai/sandbox-runtime`
 (`srt`, version 0.0.83) inside the container. The container uses a narrow seccomp profile,
-`docker/worker/seccomp.json`; see `docker/worker/README.md`. An agent can write only:
+`docker/worker/seccomp.json`; see `docker/worker/README.md`. It also runs with
+`--cap-drop ALL` and `--security-opt no-new-privileges`. An agent can write only:
 
 - its task's worktree;
 - in the project's main checkout, `.git/objects`, `.git/worktrees/<this worktree>`,
@@ -129,6 +133,11 @@ the agent commits.
 - The container uses host networking.
 - Anyone running the image elsewhere needs the seccomp profile file as well.
 - Sessions and their output still live in memory only.
+- The Worker lock decides liveness by PID, which cannot be seen across PID namespaces. A
+  natively started Worker and the container Worker pointed at the same state directory can
+  each treat the other's lock as stale and take it over, and two containers sharing a state
+  directory (same PID) take over each other's lock. Never run a native Worker against the
+  state directory `pnpm dev` uses while the container runs.
 
 The sandbox is verified only inside the container. A Worker run natively with the sandbox
 required is not supported and fails closed.

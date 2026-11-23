@@ -185,6 +185,14 @@ a containerized Worker from running against the same state at once. The
 containerized Worker uses the same Worker ID, journal and workspace as the
 native one did, so existing projects and worktrees carry over.
 
+> Found during final review (2026-11-23): the lock does not do this. It decides
+> liveness with a PID probe, which cannot see across PID namespaces, so a native
+> Worker and a containerized Worker on the same state directory can each treat
+> the other's lock as stale and take it over. Two containers sharing a state
+> directory with the same PID also take over each other's lock. This is
+> documented as a known limit in `docs/development/local-setup.md`; a lock that
+> does not depend on PIDs is a planned follow-up.
+
 The existing integration and end-to-end test helpers start their own native
 Worker and are not changed by this design; the Worker package's own `dev` and
 `start` scripts remain for them and for debugging.

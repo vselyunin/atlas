@@ -25,6 +25,11 @@ export function acquireLock(stateDir: string): () => void {
     const lock = parseLock(readFileSync(path, 'utf8'));
     if (!lock)
       throw new Error('Invalid Worker lock; inspect it before removing it', { cause: error });
+    // Known limits: `process.kill(pid, 0)` cannot see across PID namespaces. A natively started
+    // Worker and a containerized Worker pointed at the same state directory can therefore each
+    // treat the other's live lock as stale and take it over. Two containers sharing a state
+    // directory get the same PID, so the token rule below lets them take over each other's lock
+    // too. Do not point two Workers at one state directory.
     let alive: boolean;
     if (lock.pid === process.pid) {
       alive = lock.token !== undefined && heldTokens.has(lock.token);

@@ -640,7 +640,8 @@ Read it first; this plan argues from it.
 
   `runArgs` returns, in this order: `run`, `--rm`, `--init`, `--name <name>`,
   `--network host`, `--security-opt seccomp=<repoRoot>/docker/worker/seccomp.json`,
-  `-v <ATLAS_WORKSPACE_ROOT>:<same>`, `-v <ATLAS_WORKER_STATE_DIR>:<same>`,
+  `--security-opt no-new-privileges`, `--cap-drop ALL` (these two were added after the
+  final review), `-v <ATLAS_WORKSPACE_ROOT>:<same>`, `-v <ATLAS_WORKER_STATE_DIR>:<same>`,
   `-v atlas-agent-home:/home/atlas`, then `-e NAME` (name only, so values do not
   appear in the process list) for each of `ATLAS_API_WS_URL`,
   `ATLAS_WORKER_TOKEN`, `ATLAS_WORKER_ID`, `ATLAS_WORKER_NAME`,
