@@ -92,12 +92,15 @@ with a message naming the cause and the agent is not started.
 
 The sandbox puts placeholder files in the worktree for names it protects, which would break
 `git add -A`. The Worker therefore gives the agent a Git excludes file, through the agent's
-environment, that ignores these eleven names at the worktree root: `.bash_profile`,
-`.bashrc`, `.gitconfig`, `.gitmodules`, `.idea`, `.mcp.json`, `.profile`, `.ripgreprc`,
-`.vscode`, `.zprofile` and `.zshrc`. Repository files are not modified. The side effect: a new
-file with one of these names at the worktree root is not shown by `git status` and is not added
-by `git add -A` for the agent; it must be added by name. The same names in subfolders are not
-covered.
+environment, that ignores these thirteen paths at the worktree root: `.bash_profile`,
+`.bashrc`, `.claude/agents`, `.claude/commands`, `.gitconfig`, `.gitmodules`, `.idea`,
+`.mcp.json`, `.profile`, `.ripgreprc`, `.vscode`, `.zprofile` and `.zshrc`. Repository files
+are not modified. The side effect: a new file with one of these paths at the worktree root is
+not shown by `git status` and is not added by `git add -A` for the agent; it must be added by
+name. The same names in subfolders are not covered.
+
+The placeholders can stay in the worktree as empty read-only files after a session ends. Git
+run outside the agent session, without the excludes file, lists them as untracked.
 
 Codex is in the image but has not been verified under the sandbox. Treat it as unverified.
 

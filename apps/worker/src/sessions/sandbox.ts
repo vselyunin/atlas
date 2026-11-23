@@ -33,6 +33,9 @@ export const SANDBOX_OFF_NOTICE =
 export const PLACEHOLDER_NAMES: readonly string[] = [
   '.bash_profile',
   '.bashrc',
+  // These two appear once the agent has created `.claude` in the worktree.
+  '.claude/agents',
+  '.claude/commands',
   '.gitconfig',
   '.gitmodules',
   '.idea',

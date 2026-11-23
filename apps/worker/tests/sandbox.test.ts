@@ -236,7 +236,9 @@ describe('writeExcludesFile', () => {
       expect(path.startsWith(`${tmpdir()}/`)).toBe(true);
       const lines = (await readFile(path, 'utf8')).split('\n').filter(Boolean);
       expect(lines).toEqual(PLACEHOLDER_NAMES.map((name) => `/${name}`));
-      expect(lines).toHaveLength(11);
+      expect(lines).toHaveLength(13);
+      expect(lines).toContain('/.claude/agents');
+      expect(lines).toContain('/.claude/commands');
     } finally {
       await rm(dirname(path), { recursive: true, force: true });
     }
@@ -246,6 +248,7 @@ describe('writeExcludesFile', () => {
     const repo = join(directory, 'app');
     await mkdir(repo);
     await git(repo, 'init', '--quiet', '-b', 'main');
+    await mkdir(join(repo, '.claude'));
     for (const name of PLACEHOLDER_NAMES) await writeFile(join(repo, name), '');
     await writeFile(join(repo, 'real.txt'), 'kept');
     const path = await writeExcludesFile();
