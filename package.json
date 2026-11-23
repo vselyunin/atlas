@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev.mjs --web",
+    "worker:login": "node scripts/worker-login.mjs",
     "lint": "eslint . --max-warnings=0",
     "format": "node scripts/format.mjs",
     "format:check": "node scripts/format.mjs --check",
