@@ -1,5 +1,5 @@
 import { resolve, relative, isAbsolute, sep } from 'node:path';
-import { mkdirSync, realpathSync } from 'node:fs';
+import { accessSync, constants, mkdirSync, realpathSync } from 'node:fs';
 import { z } from 'zod';
 
 const agentSchema = z.object({
@@ -64,12 +64,26 @@ export function loadConfig(env: NodeJS.ProcessEnv): WorkerConfigInput {
   });
 }
 
+// mkdirSync succeeds on an existing folder the Worker cannot write, so check it here instead of
+// failing later with a raw EACCES on the first repository command or session.
+function assertWritable(path: string, label: string): void {
+  try {
+    accessSync(path, constants.W_OK | constants.X_OK);
+  } catch (error) {
+    const uid = process.getuid?.();
+    const user = uid === undefined ? 'the Worker user' : `the Worker user (uid ${uid})`;
+    throw new Error(`The ${label} ${path} is not writable by ${user}`, { cause: error });
+  }
+}
+
 export function prepareConfig(input: WorkerConfigInput): WorkerConfig {
   const config = configSchema.parse(input);
   mkdirSync(config.root, { recursive: true });
   mkdirSync(config.stateDir, { recursive: true });
   const root = realpathSync(config.root);
   const stateDir = realpathSync(config.stateDir);
+  assertWritable(root, 'workspace');
+  assertWritable(stateDir, 'state directory');
   const rel = relative(root, stateDir);
   if (!rel || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel))) {
     throw new Error('Worker state directory must be outside the repository workspace');
