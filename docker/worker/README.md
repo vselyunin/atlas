@@ -29,6 +29,8 @@ Git, bubblewrap, socat and ripgrep come from Debian bookworm. The system Git con
 The agent sandbox uses bubblewrap, which needs `clone`, `clone3`, `unshare`, `mount`, `umount2` and
 `pivot_root`. Docker's default profile allows these only with `CAP_SYS_ADMIN`, which the container
 does not get. Start the container with `--security-opt seccomp=docker/worker/seccomp.json` instead.
+`pnpm dev` also passes `--security-opt no-new-privileges` and `--cap-drop ALL`; the sandbox does not
+need any capability because bubblewrap in the image is not setuid.
 
 - `seccomp-default.json` is Docker's default profile, with unchanged content and Prettier
   formatting, from

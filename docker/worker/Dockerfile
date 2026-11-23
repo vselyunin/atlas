@@ -36,7 +36,6 @@ RUN groupadd --gid 1001 atlas \
 
 COPY --from=build /opt/atlas/worker /opt/atlas/worker
 
-ENV NODE_ENV=production
 USER atlas
 WORKDIR /opt/atlas/worker
 ENTRYPOINT ["node", "dist/main.js"]
