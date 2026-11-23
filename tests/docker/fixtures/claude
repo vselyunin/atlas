@@ -1,0 +1,3 @@
+#!/usr/bin/env node
+// Named claude so the Worker gives it the Claude profile: the task prompt and the Claude flags.
+import('./probe.mjs');
