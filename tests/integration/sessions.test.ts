@@ -115,6 +115,7 @@ it('runs an agent session through the Board socket and survives an API restart',
     await expect.poll(() => board.session?.state, { timeout: 10000 }).toBe('none');
     board.send({ type: 'start', cols: 80, rows: 24 });
     await expect.poll(() => board.states, { timeout: 15000 }).toContain('running');
+    expect(board.states).toContain('starting');
     expect(board.states.indexOf('starting')).toBeLessThan(board.states.indexOf('running'));
     expect(board.session).toMatchObject({ state: 'running', branch: `atlas/task-${taskId}` });
     await expect.poll(() => board.output, { timeout: 10000 }).toContain('READY');
