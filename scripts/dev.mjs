@@ -69,7 +69,11 @@ if (!web) {
       env.ATLAS_AGENT_GIT_NAME ||= identity.name;
       env.ATLAS_AGENT_GIT_EMAIL ||= identity.email;
     }
-    // A container left behind by a crash would hold the name.
+    // Docker would create missing bind-mount sources as root-owned directories.
+    await mkdir(env.ATLAS_WORKSPACE_ROOT, { recursive: true });
+    await mkdir(env.ATLAS_WORKER_STATE_DIR, { recursive: true });
+    // A container left behind by a crash would hold the name; let its Worker release its lock.
+    await runCommand('docker', ['stop', '-t', '10', containerName]);
     await runCommand('docker', ['rm', '-f', containerName]);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
