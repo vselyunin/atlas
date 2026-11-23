@@ -42,9 +42,9 @@ started. The Docker group was not run by the author of this document.
 
 ### Manual checks with a real logged-in Claude
 
-Run on 2026-11-23 with `pnpm dev` and the login in the `atlas-agent-home` volume.
+The checks began on 2026-11-23, with `pnpm dev` and the login in the `atlas-agent-home` volume.
 
-| Check                                                                | Result (2026-11-23)                                                                     |
+| Check                                                                | Result                                                                                  |
 | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | Session starts in the container and shows "Atlas: agent sandbox on…" | Passed, after a fix: Claude first exited with a read-only error creating `/tmp/claude`. |
 | Folder-trust question appears and can be answered on the Board       | Passed.                                                                                 |
@@ -57,10 +57,12 @@ Codex was not checked under the sandbox and is unverified.
 
 ## Review and test permissions
 
-The container and sandbox work was split into 11 tasks. Each task had an independent
-task review by a separate reviewer agent, covering spec compliance and quality; Tasks 4,
-7, 9 and 10 needed fix rounds. The implementers' own checks were self-review. A
-whole-branch review is pending at the time of writing. Earlier work was reviewed by the
+The container and sandbox work was split into 11 tasks. Tasks 1 to 10 each had an independent
+task review by a separate reviewer agent, covering spec compliance and quality; Tasks 4, 7, 9
+and 10 needed fix rounds, each followed by a scoped re-review. The Task 11 documentation was
+reviewed independently after it was first committed and corrected in a follow-up commit. The
+implementers' own checks were self-review. The whole-branch review was pending at the time of
+writing. Earlier work was reviewed by the
 implementing agent only; an independent agent review of it was attempted but unavailable
 because the service usage limit was reached.
 

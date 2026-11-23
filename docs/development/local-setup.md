@@ -90,8 +90,10 @@ The sandbox puts placeholder files in the worktree for names it protects, which 
 `git add -A`. The Worker therefore gives the agent a Git excludes file, through the agent's
 environment, that ignores these eleven names at the worktree root: `.bash_profile`,
 `.bashrc`, `.gitconfig`, `.gitmodules`, `.idea`, `.mcp.json`, `.profile`, `.ripgreprc`,
-`.vscode`, `.zprofile` and `.zshrc`. Repository files are not modified. The same names in
-subfolders are not covered.
+`.vscode`, `.zprofile` and `.zshrc`. Repository files are not modified. The side effect: a new
+file with one of these names at the worktree root is not shown by `git status` and is not added
+by `git add -A` for the agent; it must be added by name. The same names in subfolders are not
+covered.
 
 Codex is in the image but has not been verified under the sandbox. Treat it as unverified.
 
@@ -100,17 +102,18 @@ Codex is in the image but has not been verified under the sandbox. Treat it as u
 Set these in `.env` (see `.env.example`) or the environment; `pnpm dev` passes them to the
 container.
 
-| Setting                       | Meaning                                                                                                                                                                        |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ATLAS_AGENT_COMMAND`         | The agent command, split on spaces. Default `claude`. A custom command is wrapped in the sandbox too and may reach no servers unless `ATLAS_AGENT_ALLOWED_DOMAINS` lists them. |
-| `ATLAS_AGENT_SANDBOX`         | `required` (default) or `off`. `off` runs the agent unwrapped with its normal permission prompts. It exists for tests with a stand-in agent; no command sets it.               |
-| `ATLAS_AGENT_ALLOWED_DOMAINS` | Comma-separated extra hosts the agent may reach, for example `registry.npmjs.org,*.example.com`. Default empty.                                                                |
-| `ATLAS_AGENT_GIT_NAME`        | Name for the agent's commits.                                                                                                                                                  |
-| `ATLAS_AGENT_GIT_EMAIL`       | Email for the agent's commits.                                                                                                                                                 |
+| Setting                       | Meaning                                                                                                                                                                                                               |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_AGENT_COMMAND`         | The agent command, split on spaces. Default `claude`. A custom command is wrapped in the sandbox too and may reach no servers unless `ATLAS_AGENT_ALLOWED_DOMAINS` lists them.                                        |
+| `ATLAS_AGENT_SANDBOX`         | `required` (default) or `off`. `off` runs the agent unwrapped with its normal permission prompts. It exists for tests with a stand-in agent; no command sets it.                                                      |
+| `ATLAS_AGENT_ALLOWED_DOMAINS` | Comma-separated extra hosts the agent may reach, for example `registry.npmjs.org,*.example.com`. Entries are bare host names (wildcards like `*.example.com` allowed), with no scheme, path or spaces. Default empty. |
+| `ATLAS_AGENT_GIT_NAME`        | Name for the agent's commits.                                                                                                                                                                                         |
+| `ATLAS_AGENT_GIT_EMAIL`       | Email for the agent's commits.                                                                                                                                                                                        |
 
-The container cannot see your `~/.gitconfig`. When name or email is not set, `pnpm dev`
-fills both from the host's `git config user.name` and `user.email`; if the host has no
-identity, Git reports the missing one when the agent commits.
+The container cannot see your `~/.gitconfig`. `pnpm dev` fills in only the values that
+are missing, from the host's `git config user.name` and `user.email`. The Worker applies the
+identity only when both name and email are set; otherwise Git reports the missing identity when
+the agent commits.
 
 ## What the sandbox does not protect
 
@@ -140,7 +143,8 @@ exist and the final folder must not exist. Existing Git URL mode only records a
 URL and never clones it.
 
 For independently started apps (a native Worker without the container, for debugging
-only; its sessions need `ATLAS_AGENT_SANDBOX=off`), export the same
+only; its sessions need `ATLAS_AGENT_SANDBOX=off`, and the agent then runs unsandboxed as your
+own account and can change anything that account can), export the same
 `ATLAS_WORKER_TOKEN` to API and Worker, use absolute filesystem paths, and run:
 
 ```sh
