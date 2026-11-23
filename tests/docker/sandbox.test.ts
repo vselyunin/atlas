@@ -3,16 +3,18 @@ import { chown, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { IMAGE } from '../../scripts/worker-container.mjs';
 import {
   AGENT_GIT_EMAIL,
   AGENT_GIT_NAME,
+  BUILD_TIMEOUT_MS,
   fixtures,
   prepareImage,
   probeResults,
   repoRoot,
   startStack,
+  stopAllStacks,
 } from './support/stack.js';
 import type { Board, Stack, StackOptions } from './support/stack.js';
 
@@ -24,12 +26,12 @@ const probe = join(fixtures, 'probe.mjs');
 const claude = join(fixtures, 'claude');
 const probeAgent: StackOptions['agent'] = ({ stateDir }) => ['node', probe, stateDir];
 
-let stack: Stack | undefined;
+// A cold image build can take longer than a test, so it gets its own timeout.
+beforeAll(() => prepareImage(), BUILD_TIMEOUT_MS);
 
-afterEach(async () => {
-  await stack?.stop();
-  stack = undefined;
-}, 60_000);
+// Stops stacks that are still starting too, for example after a test timed out.
+afterEach(() => stopAllStacks(), 60_000);
+afterAll(() => stopAllStacks(), 60_000);
 
 // The probe's results are the evidence of these tests, so they are shown even when they pass.
 function logProbeLines(output: string) {
@@ -50,7 +52,7 @@ describe('the agent sandbox in the Worker container', () => {
   it(
     'lets the agent write and commit in its worktree and blocks everything else',
     async () => {
-      stack = await startStack({ agent: probeAgent });
+      const stack = await startStack({ agent: probeAgent });
       // Another task first, so a second worktree exists.
       const other = await stack.createLocalTask('repo', 'Other task');
       const otherBoard = await runToExit(stack, other.taskId);
@@ -70,6 +72,9 @@ describe('the agent sandbox in the Worker container', () => {
         'write-main-hooks': 'blocked',
         'write-main-config': 'blocked',
         'write-outside': 'blocked',
+        // Claude's temporary folder is writable only for the Claude profile.
+        'write-claude-tmp': 'blocked',
+        'write-home-outside': 'blocked',
         'read-state-dir': 'blocked',
         network: 'blocked',
       });
@@ -98,7 +103,7 @@ describe('the agent sandbox in the Worker container', () => {
   it(
     "fails the session and runs no agent under Docker's default seccomp profile",
     async () => {
-      stack = await startStack({ seccomp: 'default', agent: probeAgent });
+      const stack = await startStack({ seccomp: 'default', agent: probeAgent });
       const { taskId } = await stack.createLocalTask('repo', 'Probe task');
       const board = await runToExit(stack, taskId);
       const message = board.session?.message ?? '';
@@ -110,10 +115,10 @@ describe('the agent sandbox in the Worker container', () => {
   );
 
   it(
-    'passes shell text in the task title to the agent as inert text',
+    'gives the Claude profile inert task text and its own writable paths',
     async () => {
-      // Named claude, so the Worker passes the prompt and the Claude flags.
-      stack = await startStack({
+      // Named claude, so the Worker passes the prompt and the Claude flags and paths.
+      const stack = await startStack({
         agent: ({ stateDir }) => [claude, stateDir],
         // Shows the network probe can succeed, so its `blocked` above is not vacuous.
         extraDomains: ['example.com'],
@@ -128,7 +133,13 @@ describe('the agent sandbox in the Worker container', () => {
       expect(Array.isArray(argv), output).toBe(true);
       expect(argv).toContain('--dangerously-skip-permissions');
       expect((argv as unknown[]).at(-1)).toBe(`Task: ${title}`);
-      expect(results.get('network'), output).toBe('ok');
+      expect(Object.fromEntries(results), output).toMatchObject({
+        network: 'ok',
+        // Claude creates /tmp/claude when it starts and exits if it cannot.
+        'write-claude-tmp': 'ok',
+        'write-home-outside': 'blocked',
+        'write-outside': 'blocked',
+      });
       expect(await stack.exec(['test', '!', '-e', '/tmp/pwned'])).toBe(0);
     },
     TEST_TIMEOUT_MS,

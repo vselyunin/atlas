@@ -1,7 +1,8 @@
 // Stand-in agent for the Docker tests: tries to leave its worktree, reports each result and exits.
 // Plain Node, no dependencies. Argument 1 is the Worker state directory.
 import { execFile } from 'node:child_process';
-import { appendFile, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -9,13 +10,21 @@ const run = promisify(execFile);
 const [stateDir = ''] = process.argv.slice(2);
 const cwd = process.cwd();
 
-// Prints `PROBE <name> ok` when the action succeeds, `PROBE <name> blocked` when it fails.
+// A failure that shows the sandbox refused the action.
+class Refused extends Error {}
+
+// The sandbox refuses writes by mounting everything else read-only.
+const refused = (error) =>
+  error instanceof Refused || (error instanceof Error && 'code' in error && error.code === 'EROFS');
+
+// Prints `PROBE <name> ok` when the action succeeds, `PROBE <name> blocked` when the sandbox
+// refused it, and `PROBE <name> failed` when it failed for another reason.
 async function probe(name, action) {
   try {
     await action();
     console.log(`PROBE ${name} ok`);
   } catch (error) {
-    console.log(`PROBE ${name} blocked`);
+    console.log(`PROBE ${name} ${refused(error) ? 'blocked' : 'failed'}`);
     const reason = error instanceof Error ? error.message.split('\n')[0] : String(error);
     console.log(`PROBE-DETAIL ${name} ${reason}`);
   }
@@ -47,10 +56,18 @@ else {
 await probe('write-main-hooks', () => writeFile(join(commonDir, 'hooks', 'probe'), 'probe\n'));
 await probe('write-main-config', () => appendFile(join(commonDir, 'config'), '# probe\n'));
 await probe('write-outside', () => writeFile('/tmp/atlas-probe', 'probe\n'));
+// Claude's temporary folder, created the way Claude creates it when it is missing.
+await probe('write-claude-tmp', async () => {
+  await mkdir('/tmp/claude').catch((error) => {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+  });
+  await writeFile('/tmp/claude/atlas-probe', 'probe\n');
+});
+await probe('write-home-outside', () => writeFile(join(homedir(), 'outside-probe'), 'probe\n'));
 await probe('read-state-dir', async () => {
   // The sandbox hides a denied folder behind an empty one, so an empty listing is a refusal.
   const entries = await readdir(stateDir);
-  if (entries.length === 0) throw new Error('the folder appears empty');
+  if (entries.length === 0) throw new Refused('the folder appears empty');
 });
 await probe('network', async () => {
   // Node's fetch uses the sandbox's proxy only with NODE_USE_ENV_PROXY, which it reads at startup.
@@ -70,8 +87,9 @@ await probe('network', async () => {
       timeout: 10_000,
     });
   } catch (error) {
+    // The proxy refuses a host that is not allowed; without the proxy nothing resolves.
     const details = /** @type {{ killed?: boolean; stderr?: string }} */ (error);
-    throw new Error(details.killed ? 'timed out' : details.stderr?.trim() || String(error), {
+    throw new Refused(details.killed ? 'timed out' : details.stderr?.trim() || String(error), {
       cause: error,
     });
   }

@@ -93,6 +93,8 @@ export interface Stack {
 }
 
 let imageReady: Promise<void> | undefined;
+// Long enough for a cold build that waits for another test file's build first.
+export const BUILD_TIMEOUT_MS = 20 * 60_000;
 const BUILD_LOCK = join(tmpdir(), 'atlas-docker-test-build.lock');
 
 // Runs a command without streaming it, keeping all of its output for an error message.
@@ -118,7 +120,7 @@ function quietRunner() {
 
 // Test files run in parallel, and two builds of one tag at once can fail, so builds take turns.
 async function withBuildLock(action: () => Promise<void>): Promise<void> {
-  const deadline = Date.now() + 15 * 60_000;
+  const deadline = Date.now() + BUILD_TIMEOUT_MS / 2;
   for (;;) {
     try {
       await writeFile(BUILD_LOCK, String(process.pid), { flag: 'wx' });
@@ -210,24 +212,54 @@ function containerArgs(
   return result;
 }
 
-export async function startStack(options: StackOptions = {}): Promise<Stack> {
-  await prepareImage();
+interface StackHandle {
+  stopped: boolean;
+  stop(): Promise<void>;
+  starting: Promise<unknown>;
+}
+
+// Every stack from the moment it begins to start, so a test that times out while one is still
+// starting does not leave its container or volume behind.
+const stacks = new Set<StackHandle>();
+
+/** Stops every stack, including those still starting, and waits until they are cleaned up. */
+export async function stopAllStacks(): Promise<void> {
+  const handles = [...stacks];
+  await Promise.allSettled(handles.map((handle) => handle.stop()));
+  // A stack stopped while starting cleans up what it created after that, then rejects.
+  await Promise.allSettled(handles.map((handle) => handle.starting));
+}
+
+export function startStack(options: StackOptions = {}): Promise<Stack> {
+  const handle: StackHandle = {
+    stopped: false,
+    stop: () => Promise.resolve(),
+    starting: Promise.resolve(),
+  };
+  stacks.add(handle);
+  const starting = launch(options, handle);
+  handle.starting = starting;
+  return starting;
+}
+
+async function launch(options: StackOptions, handle: StackHandle): Promise<Stack> {
   const id = randomBytes(4).toString('hex');
   const containerName = `atlas-test-worker-${id}`;
   const homeVolume = `atlas-test-home-${id}`;
   const workerId = `atlas:docker-test-${id}`;
-  // Siblings, so the state directory is outside the workspace; both are mounted at these paths.
-  const base = await mkdtemp(join(tmpdir(), 'atlas-docker-'));
-  const workspace = join(base, 'workspace');
-  const stateDir = join(base, 'state');
   const sockets: { terminate(): void }[] = [];
+  let base: string | undefined;
+  let workspace: string;
+  let stateDir: string;
   let api: App | undefined;
   let container: ReturnType<typeof spawn> | undefined;
   let exited: Promise<void> = Promise.resolve();
   let volumeCreated = false;
   let log = '';
 
+  // Removes whatever exists so far; it runs again if starting creates more after a stop.
   const stop = async () => {
+    handle.stopped = true;
     for (const socket of sockets.splice(0)) socket.terminate();
     if (container) {
       await docker(['stop', '-t', '10', containerName]);
@@ -236,25 +268,39 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     }
     if (volumeCreated) await docker(['volume', 'rm', '-f', homeVolume]);
     await api?.close();
-    await rm(base, { recursive: true, force: true });
+    if (base) await rm(base, { recursive: true, force: true });
+    stacks.delete(handle);
+  };
+  handle.stop = stop;
+  const proceed = () => {
+    if (handle.stopped) throw new Error('The stack was stopped while it was starting');
   };
 
   try {
+    await prepareImage();
+    proceed();
+    // Siblings, so the state directory is outside the workspace; both are mounted at these paths.
+    base = await mkdtemp(join(tmpdir(), 'atlas-docker-'));
+    proceed();
+    workspace = join(base, 'workspace');
+    stateDir = join(base, 'state');
     for (const directory of [workspace, stateDir]) {
       await mkdir(directory);
       await chown(directory, CONTAINER_UID, CONTAINER_UID);
     }
-    if ((await docker(['volume', 'create', homeVolume])) !== 0) {
-      throw new Error(`Could not create the Docker volume ${homeVolume}`);
-    }
-    volumeCreated = true;
+    const created = await docker(['volume', 'create', homeVolume]);
+    if (created === 0) volumeCreated = true;
+    proceed();
+    if (!volumeCreated) throw new Error(`Could not create the Docker volume ${homeVolume}`);
 
     api = await buildApp({
       dbPath: join(base, 'api.sqlite'),
       workerToken: WORKER_TOKEN,
       allowedOrigin: ORIGIN,
     });
+    proceed();
     const address = await api.listen({ host: '127.0.0.1', port: 0 });
+    proceed();
 
     const agent =
       typeof options.agent === 'function'
@@ -289,6 +335,7 @@ export async function startStack(options: StackOptions = {}): Promise<Stack> {
     await waitFor(
       'Waiting for the container Worker to come online',
       async () => {
+        proceed();
         const workers = WorkerListResponseSchema.parse(
           (await app.inject('/api/v1/workers')).json<unknown>(),
         ).items;
