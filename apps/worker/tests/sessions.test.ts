@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { MAX_SESSION_OUTPUT_CHARS } from '@atlas/contracts';
 import type { SessionStartPayload } from '@atlas/contracts';
+import { prepareConfig } from '../src/config.js';
+import { SessionManager } from '../src/sessions/manager.js';
+import type { SessionEvent } from '../src/sessions/manager.js';
 import { SANDBOX_OFF_NOTICE, SANDBOX_ON_NOTICE } from '../src/sessions/sandbox.js';
 import { writeFakeSrt } from './support/sandbox.js';
 import type { FakeSrtMode } from './support/sandbox.js';
@@ -369,4 +372,69 @@ describe('sessions in the agent sandbox', () => {
       expect(await srt.calls()).toHaveLength(1);
     });
   }
+});
+
+describe("the agent's writable folders", () => {
+  let directory: string | undefined;
+  let manager: SessionManager | undefined;
+  const events: SessionEvent[] = [];
+
+  afterEach(async () => {
+    manager?.stopAll();
+    if (events.some((e) => e.type === 'session.started')) {
+      await vi.waitFor(() => expect(events.some((e) => e.type === 'session.exit')).toBe(true), {
+        timeout: 10_000,
+      });
+    }
+    manager = undefined;
+    events.length = 0;
+    if (directory) await rm(directory, { recursive: true, force: true });
+    directory = undefined;
+  });
+
+  // Starts a stand-in named codex, so the Worker uses the Codex profile, whose only writable
+  // folder is in the home directory, here a temporary one.
+  async function startCodex(sandbox: 'required' | 'off') {
+    directory = await realpath(await mkdtemp(join(tmpdir(), 'atlas-writable-')));
+    const bin = join(directory, 'bin');
+    const home = join(directory, 'home');
+    await mkdir(bin);
+    await mkdir(home);
+    await writeFakeSrt(bin, 'exec');
+    const codex = join(bin, 'codex');
+    await writeFile(codex, `#!/bin/sh\nexec '${process.execPath}' '${agentPath}'\n`, {
+      mode: 0o755,
+    });
+    vi.stubEnv('HOME', home);
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH ?? ''}`);
+    const config = prepareConfig({
+      apiUrl: 'ws://127.0.0.1:1/api/v1/workers/connect',
+      token: 'test-token',
+      id: 'atlas:test',
+      name: 'Test worker',
+      root: join(directory, 'repos'),
+      stateDir: join(directory, 'state'),
+      agent: { command: [codex], sandbox },
+    });
+    const repo = join(config.root, 'app');
+    await mkdir(repo);
+    await run('git', ['init', '--quiet', '-b', 'main'], { cwd: repo });
+    manager = new SessionManager(config, (event) => events.push(event));
+    const payload = startPayload(randomUUID(), 'app');
+    await manager.start(payload);
+    const output = () =>
+      events.flatMap((e) => (e.type === 'session.output' ? [e.payload.data] : [])).join('');
+    await vi.waitFor(() => expect(output()).toContain('READY'), { timeout: 10_000 });
+    return { codexHome: join(home, '.codex') };
+  }
+
+  it('creates them before the agent starts in the sandbox', async () => {
+    const { codexHome } = await startCodex('required');
+    expect((await stat(codexHome)).isDirectory()).toBe(true);
+  });
+
+  it('creates nothing when the sandbox is off', async () => {
+    const { codexHome } = await startCodex('off');
+    await expect(stat(codexHome)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });

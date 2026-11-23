@@ -66,6 +66,29 @@ describe('agent profiles', () => {
     expect(profile.writablePaths('/home/atlas')).toEqual([]);
   });
 
+  it('separates the writable folders the Worker creates from the writable files', () => {
+    const home = '/home/atlas';
+    const lists = (command: string) => {
+      const profile = agentProfile([command]);
+      return {
+        directories: profile.writableDirectories(home),
+        files: profile.writableFiles(home),
+        all: profile.writablePaths(home),
+      };
+    };
+    expect(lists('claude')).toEqual({
+      directories: ['/home/atlas/.claude', '/tmp/claude'],
+      files: ['/home/atlas/.claude.json'],
+      all: ['/home/atlas/.claude', '/home/atlas/.claude.json', '/tmp/claude'],
+    });
+    expect(lists('/usr/bin/codex')).toEqual({
+      directories: ['/home/atlas/.codex'],
+      files: [],
+      all: ['/home/atlas/.codex'],
+    });
+    expect(lists('node')).toEqual({ directories: [], files: [], all: [] });
+  });
+
   it('turns permission prompts off only when sandboxed and protects a leading dash', () => {
     const sandboxed = agentArgs(claude, ['claude'], '--resume', true);
     expect(sandboxed.at(-1)).toBe(' --resume');
@@ -315,6 +338,61 @@ describe('prepareSandbox', () => {
     await expect(attempt).rejects.toThrow(
       /^The agent sandbox could not start, so the agent was not started: bwrap: nope$/,
     );
+  });
+
+  it("creates the agent's missing writable folders before the check runs", async () => {
+    const home = join(directory, 'home');
+    const writableDirectories = [
+      ...agentProfile(['codex']).writableDirectories(home),
+      join(home, 'nested', 'state'),
+    ];
+    const bin = join(directory, 'bin');
+    await mkdir(bin);
+    // This srt passes its check only when every writable folder already exists.
+    const tests = writableDirectories.map((path) => `[ -d '${path}' ]`).join(' && ');
+    await writeFile(
+      join(bin, 'srt'),
+      `#!/bin/sh\n${tests} || { echo 'srt: a writable folder is missing' >&2; exit 1; }\n`,
+      { mode: 0o755 },
+    );
+    const stateDir = join(directory, 'state');
+    await mkdir(stateDir);
+
+    await prepareSandbox({
+      sessionKey: 'task-1',
+      settings,
+      stateDir,
+      cwd: directory,
+      env: { PATH: `${bin}:/usr/bin:/bin` },
+      writableDirectories,
+    });
+
+    for (const path of writableDirectories) expect((await stat(path)).isDirectory()).toBe(true);
+  });
+
+  it('does not run the check when a writable folder cannot be created', async () => {
+    const bin = join(directory, 'bin');
+    await mkdir(bin);
+    const srt = await writeFakeSrt(bin, 'exec');
+    const blocker = join(directory, 'file');
+    await writeFile(blocker, '');
+    const stateDir = join(directory, 'state');
+    await mkdir(stateDir);
+
+    const attempt = prepareSandbox({
+      sessionKey: 'task-1',
+      settings,
+      stateDir,
+      cwd: directory,
+      env: { PATH: `${bin}:/usr/bin:/bin` },
+      writableDirectories: [join(blocker, '.codex')],
+    });
+
+    await expect(attempt).rejects.toBeInstanceOf(SandboxUnavailableError);
+    await expect(attempt).rejects.toThrow(
+      /^The agent sandbox could not start, so the agent was not started: ENOTDIR/,
+    );
+    expect(await srt.calls()).toEqual([]);
   });
 
   it('fails closed when srt is missing', async () => {

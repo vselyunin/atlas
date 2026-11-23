@@ -127,10 +127,16 @@ export async function prepareSandbox(input: {
   stateDir: string;
   cwd: string;
   env: Record<string, string>;
+  // Writable folders of the agent that must exist, because the sandbox can bind only existing
+  // paths writable; a missing one would stay read-only for the agent.
+  writableDirectories?: string[];
 }): Promise<{ settingsPath: string }> {
   const directory = join(input.stateDir, 'sessions');
   const settingsPath = join(directory, `${input.sessionKey}.json`);
   try {
+    for (const writable of input.writableDirectories ?? []) {
+      await mkdir(writable, { recursive: true });
+    }
     await mkdir(directory, { recursive: true, mode: 0o700 });
     // Replace the file rather than write through it, so it is always new and private.
     await rm(settingsPath, { force: true });

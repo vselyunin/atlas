@@ -107,18 +107,20 @@ export class SessionManager {
       const args = agentArgs(profile, this.agent.command, payload.prompt, sandboxed);
       let file = agentFile;
       if (sandboxed) {
+        const home = homedir();
         const { settingsPath } = await prepareSandbox({
           sessionKey: sessionKey(sessionId),
           settings: sandboxSettings({
             worktree,
             stateDir: this.stateDir,
-            home: homedir(),
+            home,
             profile,
             allowedDomains: this.agent.allowedDomains,
           }),
           stateDir: this.stateDir,
           cwd: path,
           env,
+          writableDirectories: profile.writableDirectories(home),
         });
         if (abandoned()) return exit(stoppedEarly);
         // The agent and its arguments stay separate arguments, so no shell reads the prompt.
