@@ -158,4 +158,72 @@ describe('ensureWorktree', () => {
     expect(worktree.path).toBe(join(root, '.atlas-worktrees', 'my%20project', id));
     expect(await exists(join(worktree.path, '.git'))).toBe(true);
   });
+
+  const REDIRECTED = "The task folder's Git links no longer point at the project repository";
+
+  it('refuses a worktree whose shared Git folder was redirected', async () => {
+    const repo = await repository('app');
+    const payload = startPayload(randomUUID(), 'app');
+    const worktree = await ensureWorktree(root, repo, payload);
+    // What an agent would do to make Git load its own config for this worktree.
+    const fake = join(worktree.path, 'fake');
+    await mkdir(join(fake, 'objects'), { recursive: true });
+    await mkdir(join(fake, 'refs'));
+    await writeFile(join(fake, 'HEAD'), 'ref: refs/heads/main\n');
+    await writeFile(join(fake, 'config'), '[core]\n\tfsmonitor = false\n');
+    await writeFile(join(worktree.gitDir, 'commondir'), `${fake}\n`);
+
+    await expect(ensureWorktree(root, repo, payload)).rejects.toThrow(REDIRECTED);
+  });
+
+  it('reads the shared Git folder path the way Git does, leading space included', async () => {
+    const repo = await repository('app');
+    const payload = startPayload(randomUUID(), 'app');
+    const worktree = await ensureWorktree(root, repo, payload);
+    // Git takes this as a relative path inside the worktree's Git folder.
+    await writeFile(join(worktree.gitDir, 'commondir'), ` ${join(repo, '.git')}\n`);
+
+    await expect(ensureWorktree(root, repo, payload)).rejects.toThrow(REDIRECTED);
+  });
+
+  it("refuses a task folder that points at another task's Git folder", async () => {
+    const repo = await repository('app');
+    const first = await ensureWorktree(root, repo, startPayload(randomUUID(), 'app'));
+    const payload = startPayload(randomUUID(), 'app');
+    const second = await ensureWorktree(root, repo, payload);
+    await writeFile(join(second.path, '.git'), `gitdir: ${first.gitDir}\n`);
+
+    await expect(ensureWorktree(root, repo, payload)).rejects.toThrow(REDIRECTED);
+  });
+
+  it('accepts a pointer file with Windows line endings', async () => {
+    const repo = await repository('app');
+    const payload = startPayload(randomUUID(), 'app');
+    const worktree = await ensureWorktree(root, repo, payload);
+    await writeFile(join(worktree.path, '.git'), `gitdir: ${worktree.gitDir}\r\n`);
+
+    expect(await ensureWorktree(root, repo, payload)).toEqual(worktree);
+  });
+
+  it('refuses a task folder that points at a Git folder outside the project', async () => {
+    const repo = await repository('app');
+    const other = await repository('other');
+    const payload = startPayload(randomUUID(), 'app');
+    const worktree = await ensureWorktree(root, repo, payload);
+    await git(other, 'worktree', 'add', '-b', 'side', join(directory, 'side'));
+    const foreign = await git(join(directory, 'side'), 'rev-parse', '--absolute-git-dir');
+    await writeFile(join(worktree.path, '.git'), `gitdir: ${foreign}\n`);
+
+    await expect(ensureWorktree(root, repo, payload)).rejects.toThrow(REDIRECTED);
+  });
+
+  it('still reports a task folder that is not a worktree at all', async () => {
+    const repo = await repository('app');
+    const id = randomUUID();
+    await mkdir(join(root, '.atlas-worktrees', 'app', id), { recursive: true });
+
+    await expect(ensureWorktree(root, repo, startPayload(id, 'app'))).rejects.toThrow(
+      'The task folder exists but is not a Git worktree',
+    );
+  });
 });

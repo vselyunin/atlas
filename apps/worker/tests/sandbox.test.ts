@@ -153,7 +153,11 @@ describe('sandboxSettings', () => {
           '/home/atlas/.claude.json',
           '/tmp/claude',
         ],
-        denyWrite: [],
+        denyWrite: [
+          '/srv/my repos/my app/.git/worktrees/task 1/commondir',
+          '/srv/my repos/my app/.git/worktrees/task 1/gitdir',
+          '/srv/my repos/my app/.git/worktrees/task 1/config.worktree',
+        ],
       },
     });
   });

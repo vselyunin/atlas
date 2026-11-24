@@ -102,6 +102,19 @@ name. The same names in subfolders are not covered.
 The placeholders can stay in the worktree as empty read-only files after a session ends. Git
 run outside the agent session, without the excludes file, lists them as untracked.
 
+Treat a task worktree as untrusted on the host. Look at an agent's work from the project
+folder, for example `git log atlas/task-<id>` or `git diff main...atlas/task-<id>`, and do not
+run Git or open an editor that runs Git inside the worktree folder. The sandbox stops the agent
+from rewriting the files that link a worktree to the project repository (`commondir`, `gitdir`
+and `config.worktree` in the worktree's Git folder), and the Worker checks those links before
+it reuses a task folder. Other routes stay open, because the rest of the worktree's Git folder
+and the worktree itself are writable for the agent. Examples: a planted rebase in progress
+whose steps run commands when you continue it, a nested repository inside the worktree, and a
+project that keeps its Git hooks in the working tree.
+
+The project's Git object store is writable for the agent too, so it can replace stored file
+contents, including those of `main`. `git fsck` in the project folder reports such a change.
+
 Codex is in the image but has not been verified under the sandbox. Treat it as unverified.
 
 ## Worker settings

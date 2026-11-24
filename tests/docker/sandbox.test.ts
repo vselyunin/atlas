@@ -71,6 +71,12 @@ describe('the agent sandbox in the Worker container', () => {
         'write-other-worktree': 'blocked',
         'write-main-hooks': 'blocked',
         'write-main-config': 'blocked',
+        'write-worktree-commondir': 'blocked',
+        'write-worktree-gitdir': 'blocked',
+        'write-worktree-config.worktree': 'blocked',
+        'replace-worktree-commondir': 'blocked',
+        'write-worktree-dotgit': 'blocked',
+        'replace-worktree-dotgit': 'blocked',
         'write-outside': 'blocked',
         // Claude's temporary folder is writable only for the Claude profile.
         'write-claude-tmp': 'blocked',

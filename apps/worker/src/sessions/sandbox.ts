@@ -47,6 +47,9 @@ export const PLACEHOLDER_NAMES: readonly string[] = [
   '.zshrc',
 ];
 
+// Files in a worktree's Git folder that point Git at the shared repository and its config.
+export const WORKTREE_LINK_FILES: readonly string[] = ['commondir', 'gitdir', 'config.worktree'];
+
 export function sandboxSettings(input: {
   worktree: Worktree;
   stateDir: string;
@@ -71,7 +74,9 @@ export function sandboxSettings(input: {
         join(worktree.commonDir, 'logs'),
         ...profile.writablePaths(input.home),
       ],
-      denyWrite: [],
+      // These files decide which config and hooks Git uses in the worktree. An agent that could
+      // rewrite them would get its own commands run by Git outside the sandbox.
+      denyWrite: WORKTREE_LINK_FILES.map((name) => join(worktree.gitDir, name)),
     },
   };
 }

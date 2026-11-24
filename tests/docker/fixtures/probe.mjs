@@ -1,7 +1,7 @@
 // Stand-in agent for the Docker tests: tries to leave its worktree, reports each result and exits.
 // Plain Node, no dependencies. Argument 1 is the Worker state directory.
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, readdir, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, open, readdir, rename, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -55,6 +55,40 @@ else {
 
 await probe('write-main-hooks', () => writeFile(join(commonDir, 'hooks', 'probe'), 'probe\n'));
 await probe('write-main-config', () => appendFile(join(commonDir, 'config'), '# probe\n'));
+// The files that tell Git which shared repository, config and hooks this worktree uses. Opening
+// for append changes nothing if the sandbox lets it through.
+const gitDir = await git('rev-parse', '--absolute-git-dir');
+for (const name of ['commondir', 'gitdir', 'config.worktree']) {
+  await probe(`write-worktree-${name}`, async () => {
+    try {
+      await (await open(join(gitDir, name), 'a')).close();
+    } catch (error) {
+      // A file that does not exist yet is covered by an unwritable placeholder, not a mount.
+      if (error instanceof Error && 'code' in error && error.code === 'EACCES') {
+        throw new Refused(error.message, { cause: error });
+      }
+      throw error;
+    }
+  });
+}
+// Swapping a file for another one would get around a read-only file. A protected file is a mount
+// point, so the move fails as busy, read-only or cross-device.
+const replace = async (path) => {
+  try {
+    await rename(path, `${path}.moved`);
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : undefined;
+    if (['EBUSY', 'EROFS', 'EXDEV'].includes(code)) {
+      throw new Refused(String(error), { cause: error });
+    }
+    throw error;
+  }
+  await rename(`${path}.moved`, path);
+};
+await probe('replace-worktree-commondir', () => replace(join(gitDir, 'commondir')));
+// The pointer from the task folder to its Git folder; the sandbox runtime protects it by itself.
+await probe('write-worktree-dotgit', async () => (await open(join(cwd, '.git'), 'a')).close());
+await probe('replace-worktree-dotgit', () => replace(join(cwd, '.git')));
 await probe('write-outside', () => writeFile('/tmp/atlas-probe', 'probe\n'));
 // Claude's temporary folder, created the way Claude creates it when it is missing.
 await probe('write-claude-tmp', async () => {

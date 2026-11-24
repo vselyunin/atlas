@@ -398,6 +398,19 @@ UI works on the Board with permission prompts off.
 - The container uses host networking.
 - Anyone running the image elsewhere needs the seccomp profile file as well.
 - Sessions and their output still live in memory only.
+- Added 2026-11-24 after the pull request review: a task worktree holds files
+  the agent wrote, so Git run in it on the host can be made to run the agent's
+  commands. The sandbox denies writes to the worktree's `commondir`, `gitdir`
+  and `config.worktree`, and the Worker checks those links before it reuses a
+  task folder. Other routes stay open because the rest of the worktree's Git
+  folder is writable: a planted rebase todo with `exec` lines runs on
+  `git rebase --continue` (reproduced in review), and a nested repository or a
+  hooks path inside the working tree would behave alike (not tested). Inspect
+  agent work from the main checkout, not by running Git inside a task worktree.
+- Added 2026-11-24: "damage the shared Git object store" above includes
+  replacing a stored object with other content under the same name, so files
+  checked out from `main` can change (reproduced in review). `git fsck`
+  reports it. Closing this needs a separate object folder per agent.
 
 ## Deferred: isolating agent logins
 

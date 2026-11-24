@@ -22,7 +22,7 @@ temporary data and separate ports, leaving the personal workspace untouched.
 
 ### Worker container and agent sandbox
 
-At the time of writing `pnpm check` runs 60 contract, 84 Worker, 28 API and 41 Board
+At the time of writing `pnpm check` runs 60 contract, 90 Worker, 28 API and 41 Board
 tests, plus 10 integration tests. They cover, with a stand-in agent and the sandbox off:
 
 - session message schemas and limits, and the two accepted capability lists;
@@ -75,7 +75,15 @@ implementers' own checks were self-review. An independent whole-branch review th
 critical and six important issues. Five were fixed and independently re-reviewed; for the
 Worker lock that meant documenting the limit, not removing it. The sixth was the unfinished
 real-Claude checks above. The placeholder fix that followed those checks was self-reviewed
-only. Twelve minor findings from that review remain open. Earlier work was reviewed by the
+only. Twelve minor findings from that review remain open.
+
+A second independent review, of the whole pull request, found one critical issue: a sandboxed
+agent could redirect its worktree's Git links so that Git run there on the host executed the
+agent's commands. The fix was independently re-reviewed, which confirmed the reported route
+closed and added two important findings, both about limits that are now documented and not
+removed: other writable Git state in the worktree, and the writable shared object store. Its
+smaller findings on the fix were applied and those last changes were self-reviewed only. Ten
+minor findings from the pull request review remain open. Earlier work was reviewed by the
 implementing agent only; an independent agent review of it was attempted but unavailable
 because the service usage limit was reached.
 

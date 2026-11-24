@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { lstat, mkdir, readFile, realpath, stat } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { SessionStartPayload } from '@atlas/contracts';
 
@@ -43,6 +43,35 @@ async function requireRealDirectory(path: string, label: string) {
   }
 }
 
+// A task folder is reused across sessions, and an earlier agent could have changed it. Before Git
+// runs there, check that it still belongs to the project repository: a redirected worktree would
+// make Git load config and hooks of the agent's choosing.
+async function requireLinkedWorktree(path: string, commonDir: string) {
+  const pointer = await readFile(join(path, '.git'), 'utf8').catch(() => null);
+  // Like Git, drop only the line ending: a leading space is part of the path.
+  const line = (text: string) => text.replace(/[\r\n]+$/, '');
+  const target = pointer === null ? undefined : /^gitdir: (.+)$/.exec(line(pointer))?.[1];
+  if (target === undefined) {
+    throw new Error(`The task folder exists but is not a Git worktree: ${path}`);
+  }
+  const linked = await (async () => {
+    const common = await realpath(commonDir);
+    const gitDir = await realpath(resolve(path, target));
+    const read = async (name: string) => line(await readFile(join(gitDir, name), 'utf8'));
+    return (
+      gitDir.startsWith(join(common, 'worktrees') + sep) &&
+      (await realpath(resolve(gitDir, await read('commondir')))) === common &&
+      // The Git folder must name this task folder, not another task's.
+      (await realpath(resolve(gitDir, await read('gitdir')))) === join(await realpath(path), '.git')
+    );
+  })().catch(() => false);
+  if (!linked) {
+    throw new Error(
+      `The task folder's Git links no longer point at the project repository, so it was not used: ${path}`,
+    );
+  }
+}
+
 export async function ensureWorktree(
   root: string,
   repository: string,
@@ -81,14 +110,20 @@ export async function ensureWorktree(
   await requireRealDirectory(base, 'The worktree folder');
   await requireRealDirectory(projectDirectory, 'The project worktree folder');
 
+  const commonDir = await git(repository, [
+    'rev-parse',
+    '--path-format=absolute',
+    '--git-common-dir',
+  ]);
   const describe = async (path: string, branch: string): Promise<Worktree> => ({
     path,
     branch,
     gitDir: await git(path, ['rev-parse', '--absolute-git-dir']),
-    commonDir: await git(repository, ['rev-parse', '--path-format=absolute', '--git-common-dir']),
+    commonDir,
   });
   const reuse = async (path: string, branch: string) => {
     if (!(await succeeds(stat(path)))) return null;
+    await requireLinkedWorktree(path, commonDir);
     if (!(await isTopLevel(path))) {
       throw new Error(`The task folder exists but is not a Git worktree: ${path}`);
     }
