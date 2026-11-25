@@ -3,13 +3,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CREDENTIAL_GRANT_WINDOW_MS } from '@atlas/contracts';
 import type { FastifyBaseLogger } from 'fastify';
-import type WebSocket from 'ws';
+import WebSocket from 'ws';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/db/client.js';
 import { githubLinks, operations, projects, workers } from '../src/db/schema.js';
 import { AppFile } from '../src/github/app-file.js';
 import { GitHubClient } from '../src/github/client.js';
-import { CredentialBroker } from '../src/github/credentials.js';
+import {
+  CredentialBroker,
+  GITHUB_GRANT_BUDGET_MS,
+  MAX_GITHUB_ATTEMPTS,
+  WORKER_GIT_BUDGET_MS,
+} from '../src/github/credentials.js';
 import type { BrokerTimers } from '../src/github/credentials.js';
 import { ApiError } from '../src/http/errors.js';
 import { REPOSITORY, resetStandIn, startCloneApi } from './support/clone-api.js';
@@ -259,6 +264,42 @@ describe('the credential broker over the Worker socket', { timeout: 30_000 }, ()
     expect(reply.type).toBe('credential.grant');
     if (reply.type !== 'credential.grant' || granted.type !== 'credential.grant') return;
     expect(reply.payload.token).not.toBe(granted.payload.token);
+    // The new grant replaces the first one, which is revoked.
+    await until(() => revocations(granted.payload.token).length === 1);
+    expect(revocations(reply.payload.token)).toEqual([]);
+  });
+
+  it('grants once for two requests sent together', async () => {
+    const fake = await worker();
+    const dispatch = await dispatchedClone(fake);
+    const replies = await Promise.all([
+      fake.requestCredential(dispatch.commandId),
+      fake.requestCredential(dispatch.commandId),
+    ]);
+    expect(replies.map((reply) => reply.type).sort()).toEqual([
+      'credential.grant',
+      'credential.refusal',
+    ]);
+    expect(replies.find((reply) => reply.type === 'credential.refusal')).toMatchObject({
+      payload: { code: 'already_granted' },
+    });
+    expect(contentsTokenRequests()).toHaveLength(1);
+  });
+
+  it('revokes the token when the API rejects the result', async () => {
+    const fake = await worker();
+    const dispatch = await dispatchedClone(fake);
+    const reply = await fake.requestCredential(dispatch.commandId);
+    if (reply.type !== 'credential.grant') throw new Error('Expected a grant');
+    fake.send({
+      type: 'command.result',
+      commandId: dispatch.commandId,
+      payload: { status: 'succeeded', localPath: '/somewhere/else' },
+    });
+    expect(await fake.next('protocol.error')).toMatchObject({
+      payload: { code: 'invalid_result_path' },
+    });
+    await until(() => revocations(reply.payload.token).length === 1);
   });
 
   it('revokes the token when the result arrives', async () => {
@@ -334,34 +375,71 @@ describe('the credential broker over the Worker socket', { timeout: 30_000 }, ()
   });
 });
 
-// The broker on its own, for what the app cannot show without waiting: the window timer, a GitHub
-// that does not answer, and shutdown.
+// The broker on its own, with timers driven by the test's clock: the grant window, the Git
+// budget, the GitHub budget, and shutdown.
 describe('the credential broker', { timeout: 30_000 }, () => {
-  type Pending = { callback: () => void; ms: number; cleared: boolean };
+  type Pending = {
+    callback: () => void;
+    ms: number;
+    due: number;
+    cleared: boolean;
+    fired: boolean;
+  };
   let directory: string;
   let database: ReturnType<typeof openDatabase>;
   let timers: Pending[];
-  const socket = {} as WebSocket;
-  const logged: unknown[] = [];
+  let releaseHold: (() => void) | undefined;
+  const open = () => ({ readyState: WebSocket.OPEN }) as WebSocket;
   const log = {
-    info: (...args: unknown[]) => logged.push(args),
-    warn: (...args: unknown[]) => logged.push(args),
-    error: (...args: unknown[]) => logged.push(args),
+    info: () => undefined,
+    warn: () => undefined,
+    error: () => undefined,
   } as unknown as FastifyBaseLogger;
   const fakeTimers: BrokerTimers = {
     set(callback, ms) {
-      const pending = { callback, ms, cleared: false };
+      const pending = { callback, ms, due: clock + ms, cleared: false, fired: false };
       timers.push(pending);
       return { clear: () => (pending.cleared = true) };
     },
   };
 
+  // Moves the clock on and runs every timer that has come due.
+  function advance(ms: number) {
+    clock += ms;
+    for (const timer of [...timers]) {
+      if (!timer.cleared && !timer.fired && timer.due <= clock) {
+        timer.fired = true;
+        timer.callback();
+      }
+    }
+  }
+
+  // Holds back GitHub's answer to the Contents token request until releaseHold runs.
+  function holdContentsMint() {
+    const gate = new Promise<void>((resolve) => {
+      releaseHold = resolve;
+    });
+    github.state.holdWhen = (request) =>
+      request.method === 'POST' &&
+      request.path.endsWith('/access_tokens') &&
+      JSON.stringify(request.body).includes('"contents"')
+        ? gate
+        : null;
+  }
+
+  function contentsToken() {
+    return [...github.state.installationTokens.values()].find(
+      (token) => 'contents' in token.permissions,
+    )?.token;
+  }
+
   beforeEach(() => {
     resetStandIn(github);
+    clock = START;
     timers = [];
     directory = mkdtempSync(join(tmpdir(), 'atlas-broker-'));
     writeFileSync(join(directory, 'github-app.json'), JSON.stringify(github.secrets));
-    database = openDatabase(':memory:', () => new Date(START).toISOString());
+    database = openDatabase(':memory:', () => new Date(clock).toISOString());
     const stamp = new Date(START).toISOString();
     database.db
       .insert(workers)
@@ -420,79 +498,162 @@ describe('the credential broker', { timeout: 30_000 }, () => {
       .run();
   });
   afterEach(() => {
+    releaseHold?.();
+    releaseHold = undefined;
+    github.state.holdWhen = undefined;
     database.close();
     rmSync(directory, { recursive: true, force: true });
   });
 
-  function broker(budgetMs?: number) {
+  function broker() {
     return new CredentialBroker({
-      context: { db: database.db, now: () => new Date(START).toISOString() },
+      context: { db: database.db, now: () => new Date(clock).toISOString() },
       log,
       github: {
         appFile: new AppFile(join(directory, 'github-app.json')),
         client: new GitHubClient({ apiUrl: github.apiUrl, webUrl: github.webUrl }),
       },
       timers: fakeTimers,
-      ...(budgetMs === undefined ? {} : { budgetMs }),
     });
   }
 
-  it('revokes the token when the grant window closes, and refuses after it', async () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+  it('keeps a grant made late in the window past its close, until the result', async () => {
     const subject = broker();
+    const socket = open();
     subject.noteDispatch('command-1', socket);
-    const window = timers.find((timer) => timer.ms === CREDENTIAL_GRANT_WINDOW_MS);
+    advance(CREDENTIAL_GRANT_WINDOW_MS - 1000);
     const { token } = await subject.request('command-1', 'atlas:test', socket);
+    advance(2000);
+    await settle();
+    expect(revocations(token)).toEqual([]);
     expect(github.state.installationTokens.has(token)).toBe(true);
-    window?.callback();
-    await until(() => !github.state.installationTokens.has(token));
+    await subject.release('command-1');
+    expect(revocations(token)).toHaveLength(1);
+    expect(github.state.installationTokens.has(token)).toBe(false);
+  });
+
+  it('revokes a granted token without a result once the Git budget has passed', async () => {
+    // Two Git processes of 30 minutes each, and a minute of margin.
+    expect(WORKER_GIT_BUDGET_MS).toBe(61 * 60_000);
+    const subject = broker();
+    const socket = open();
+    subject.noteDispatch('command-1', socket);
+    advance(10 * 60_000);
+    const { token } = await subject.request('command-1', 'atlas:test', socket);
+    advance(WORKER_GIT_BUDGET_MS - 1);
+    await settle();
+    expect(revocations(token)).toEqual([]);
+    advance(1);
+    await until(() => revocations(token).length === 1);
+    expect(github.state.installationTokens.has(token)).toBe(false);
+    await subject.close();
+  });
+
+  it('refuses a request after the window closed', async () => {
+    const subject = broker();
+    const socket = open();
+    subject.noteDispatch('command-1', socket);
+    advance(CREDENTIAL_GRANT_WINDOW_MS + 1000);
     await expect(subject.request('command-1', 'atlas:test', socket)).rejects.toMatchObject({
       code: 'grant_window_closed',
     });
+    expect(contentsTokenRequests()).toEqual([]);
   });
 
-  it('refuses in time when GitHub does not answer', async () => {
-    const subject = broker(50);
+  it('refuses with its own message once the GitHub budget is spent', async () => {
+    const subject = broker();
+    const socket = open();
     subject.noteDispatch('command-1', socket);
-    github.state.failWith = 'hang';
+    holdContentsMint();
     const asked = subject.request('command-1', 'atlas:test', socket);
-    await until(() => github.state.requests.length > 0);
-    const budget = timers.find((timer) => timer.ms === 50 && !timer.cleared);
-    budget?.callback();
+    await until(() => contentsTokenRequests().length === 1);
+    const late = contentsToken();
+    if (!late) throw new Error('Expected the stand-in to have minted a token');
+    const budget = timers.find((timer) => timer.ms === GITHUB_GRANT_BUDGET_MS && !timer.cleared);
+    expect(budget).toBeDefined();
+    advance(GITHUB_GRANT_BUDGET_MS);
     const refused = await asked.catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(ApiError);
-    expect(refused).toMatchObject({ code: 'github_unavailable' });
+    expect(refused).toMatchObject({
+      code: 'github_unavailable',
+      message: 'GitHub did not answer in time',
+    });
+    // The token GitHub hands out after the budget is revoked at once.
+    releaseHold?.();
+    await until(() => revocations(late).length === 1);
+    expect(github.state.installationTokens.has(late)).toBe(false);
+    await subject.close();
+  });
+
+  it('revokes a grant at once when its connection closed meanwhile', async () => {
+    const subject = broker();
+    const socket = { readyState: WebSocket.OPEN as number };
+    subject.noteDispatch('command-1', socket as WebSocket);
+    holdContentsMint();
+    const asked = subject.request('command-1', 'atlas:test', socket as WebSocket);
+    await until(() => contentsTokenRequests().length === 1);
+    const token = contentsToken();
+    if (!token) throw new Error('Expected the stand-in to have minted a token');
+    socket.readyState = WebSocket.CLOSED;
+    releaseHold?.();
+    await expect(asked).rejects.toMatchObject({ code: 'wrong_connection' });
+    await until(() => revocations(token).length === 1);
+    await subject.close();
+  });
+
+  it(`asks GitHub at most ${MAX_GITHUB_ATTEMPTS} times per dispatch`, async () => {
+    const subject = broker();
+    const socket = open();
+    subject.noteDispatch('command-1', socket);
+    github.state.failWith = 500;
+    for (let attempt = 0; attempt < MAX_GITHUB_ATTEMPTS; attempt += 1) {
+      await expect(subject.request('command-1', 'atlas:test', socket)).rejects.toMatchObject({
+        code: 'github_unavailable',
+      });
+    }
+    const asked = github.state.requests.length;
+    await expect(subject.request('command-1', 'atlas:test', socket)).rejects.toMatchObject({
+      code: 'already_granted',
+    });
+    expect(github.state.requests).toHaveLength(asked);
     github.state.failWith = null;
     await subject.close();
   });
 
   it('revokes held tokens when it closes', async () => {
     const subject = broker();
+    const socket = open();
     subject.noteDispatch('command-1', socket);
     const { token } = await subject.request('command-1', 'atlas:test', socket);
     await subject.close();
     expect(github.state.installationTokens.has(token)).toBe(false);
-    expect(timers.every((timer) => timer.cleared)).toBe(true);
+    expect(timers.every((timer) => timer.cleared || timer.fired)).toBe(true);
   });
 
   it('refuses a request on a connection other than the dispatching one', async () => {
     const subject = broker();
-    subject.noteDispatch('command-1', socket);
-    await expect(subject.request('command-1', 'atlas:test', {} as WebSocket)).rejects.toMatchObject(
-      { code: 'wrong_connection' },
-    );
+    subject.noteDispatch('command-1', open());
+    await expect(subject.request('command-1', 'atlas:test', open())).rejects.toMatchObject({
+      code: 'wrong_connection',
+    });
     await subject.close();
   });
 
-  it('keeps an earlier token across a re-dispatch and revokes both on release', async () => {
+  it('keeps the first token across a re-dispatch until a new grant replaces it', async () => {
     const subject = broker();
+    const socket = open();
     subject.noteDispatch('command-1', socket);
     const first = await subject.request('command-1', 'atlas:test', socket);
-    const next = {} as WebSocket;
+    const next = open();
     subject.noteDispatch('command-1', next);
-    const second = await subject.request('command-1', 'atlas:test', next);
+    await settle();
     expect(github.state.installationTokens.has(first.token)).toBe(true);
+    const second = await subject.request('command-1', 'atlas:test', next);
+    await until(() => !github.state.installationTokens.has(first.token));
+    expect(github.state.installationTokens.has(second.token)).toBe(true);
     await subject.release('command-1');
-    expect(github.state.installationTokens.has(first.token)).toBe(false);
     expect(github.state.installationTokens.has(second.token)).toBe(false);
   });
 });

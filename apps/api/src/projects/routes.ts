@@ -38,7 +38,7 @@ export function registerProjectRoutes(
       request.user?.id,
       github,
     );
-    if (operation) dispatchPending(context, registry, operation.workerId, operation.id, broker);
+    if (operation) dispatchPending(context, registry, broker, operation.workerId, operation.id);
     return reply.code(operation ? 202 : 201).send(
       ProjectCreateResponseSchema.parse({
         project,

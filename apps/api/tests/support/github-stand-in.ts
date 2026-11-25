@@ -65,6 +65,8 @@ export type StandInState = {
   appOwnerType?: 'User' | 'Organization';
   // Fails only the matching requests with this status; others are answered normally.
   failWhen?: (request: StandInRequest) => 500 | null;
+  // Holds back the answer to a matching request until the returned promise settles.
+  holdWhen?: (request: StandInRequest) => Promise<void> | null;
   requests: StandInRequest[];
   // Tokens the stand-in has issued and not yet revoked.
   userTokens: Map<string, string>;
@@ -125,7 +127,17 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
   const challenges = new Map<string, string>();
   let origin = '';
 
+  // Answers held back by `holdWhen`, by response.
+  const heldResponses = new WeakMap<ServerResponse, Promise<void>>();
+
   function send(response: ServerResponse, status: number, body?: unknown, headers = {}) {
+    const held = heldResponses.get(response);
+    if (held) {
+      heldResponses.delete(response);
+      const write = () => send(response, status, body, headers);
+      void held.then(write, write);
+      return;
+    }
     response.writeHead(status, {
       ...headers,
       ...(body === undefined ? {} : { 'content-type': 'application/json' }),
@@ -491,6 +503,8 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
       const authorization = request.headers.authorization ?? null;
       const recorded = { method, path: url.pathname, body, authorization };
       state.requests.push(recorded);
+      const held = state.holdWhen?.(recorded) ?? null;
+      if (held) heldResponses.set(response, held);
 
       const failure = state.failWhen?.(recorded) ?? null;
       if (failure !== null) return send(response, failure, { message: 'Server Error' });

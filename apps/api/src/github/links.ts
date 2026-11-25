@@ -1,7 +1,8 @@
+import { REPOSITORY_CLONE_CAPABILITY } from '@atlas/contracts';
 import type { GithubLink } from '@atlas/contracts';
 import { eq } from 'drizzle-orm';
 import type { ApiContext, DbTransaction } from '../db/client.js';
-import { githubLinks } from '../db/schema.js';
+import { githubLinks, operations } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { getProject } from '../projects/service.js';
 import type { AppFile } from './app-file.js';
@@ -102,7 +103,25 @@ export class LinkService {
   }
 
   remove(projectId: string): void {
-    getProject(this.context.db, projectId);
+    const project = getProject(this.context.db, projectId);
+    // An unfinished clone needs the link to be sent again after a reconnect.
+    if (project.operationId) {
+      const operation = this.context.db
+        .select({ kind: operations.kind, state: operations.state })
+        .from(operations)
+        .where(eq(operations.id, project.operationId))
+        .get();
+      if (
+        operation?.kind === REPOSITORY_CLONE_CAPABILITY &&
+        (operation.state === 'pending' || operation.state === 'accepted')
+      ) {
+        throw new ApiError(
+          409,
+          'project_not_linkable',
+          'The project is still being cloned from this repository',
+        );
+      }
+    }
     const removed = this.context.db
       .delete(githubLinks)
       .where(eq(githubLinks.projectId, projectId))

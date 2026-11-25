@@ -30,6 +30,7 @@ export function resetStandIn(github: GithubStandIn) {
     authorizeCode: null,
     failWith: null,
     failWhen: undefined,
+    holdWhen: undefined,
     requests: [],
     installations: [{ id: 1, account: github.secrets.account }],
     repositories: [{ ...REPOSITORY }],

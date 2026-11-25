@@ -6,6 +6,12 @@ import {
   GithubLinkResponseSchema,
 } from '@atlas/contracts';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { openDatabase } from '../src/db/client.js';
+import { projects, workers as workerRows } from '../src/db/schema.js';
+import type { AppFile } from '../src/github/app-file.js';
+import { GitHubClient } from '../src/github/client.js';
+import { createProject } from '../src/projects/service.js';
+import type { WorkerRegistry } from '../src/workers/registry.js';
 import { REPOSITORY, errorCode, resetStandIn, startCloneApi } from './support/clone-api.js';
 import type { CloneApi } from './support/clone-api.js';
 import { NO_CLONE_CAPABILITIES, connectWorker } from './support/fake-worker.js';
@@ -203,5 +209,87 @@ describe('creating a project by cloning', { timeout: 30_000 }, () => {
 
     const older = await worker({ capabilities: NO_CLONE_CAPABILITIES });
     await expect(older.next('command.dispatch', 300)).rejects.toThrow('No matching message');
+  });
+});
+
+describe('unlinking a project being cloned', { timeout: 30_000 }, () => {
+  it('is refused until the clone has finished', async () => {
+    const fake = await worker();
+    const created = await api.create({ ...clone, githubRepositoryId: REPOSITORY.id });
+    const { project } = ProjectCreateResponseSchema.parse(created.json<unknown>());
+    const dispatch = await fake.next('command.dispatch');
+    const unlink = () =>
+      api.app.inject({
+        method: 'DELETE',
+        url: `/api/v1/projects/${project.id}/github-link`,
+        headers: { cookie: api.owner },
+        payload: {},
+      });
+
+    const pending = await unlink();
+    expect(pending.statusCode).toBe(409);
+    expect(errorCode(pending)).toBe('project_not_linkable');
+
+    fake.send({ type: 'command.accepted', commandId: dispatch.commandId, payload: {} });
+    const accepted = await unlink();
+    expect(accepted.statusCode).toBe(409);
+    expect(errorCode(accepted)).toBe('project_not_linkable');
+
+    fake.send({
+      type: 'command.result',
+      commandId: dispatch.commandId,
+      payload: { status: 'succeeded', localPath: '/tmp/atlas-test/repo' },
+    });
+    await fake.next('command.result_ack');
+    expect((await unlink()).statusCode).toBe(204);
+  });
+});
+
+// Through HTTP an unreadable App file is refused by the access check before any route runs, so
+// the create path is called directly here.
+describe('an unreadable App file while cloning', () => {
+  it('answers 502 github_unavailable, does not name the file and writes nothing', async () => {
+    const stamp = new Date().toISOString();
+    const database = openDatabase(':memory:', () => stamp);
+    try {
+      database.db
+        .insert(workerRows)
+        .values({
+          id: 'atlas:test',
+          name: 'Test',
+          kind: 'atlas',
+          availability: 'online',
+          lastSeenAt: stamp,
+          workspaceRoot: '/tmp/atlas-test',
+          capabilities: ['repository.init', 'agent.session', 'repository.clone'],
+        })
+        .run();
+      const appFile = {
+        path: '/secret/github-app.json',
+        read() {
+          throw new Error('GitHub App file is not readable: /secret/github-app.json');
+        },
+      } as unknown as AppFile;
+      const registry = { isOnline: () => true } as unknown as WorkerRegistry;
+      const created = createProject(
+        { db: database.db, now: () => stamp },
+        registry,
+        {
+          name: 'Cloned',
+          repository: { ...clone, mode: 'local', githubRepositoryId: REPOSITORY.id },
+        },
+        undefined,
+        {
+          appFile,
+          client: new GitHubClient({ apiUrl: github.apiUrl, webUrl: github.webUrl }),
+        },
+      );
+      const refused = await Promise.resolve(created).catch((error: unknown) => error);
+      expect(refused).toMatchObject({ statusCode: 502, code: 'github_unavailable' });
+      expect((refused as Error).message).not.toContain('/secret');
+      expect(database.db.select().from(projects).all()).toEqual([]);
+    } finally {
+      database.close();
+    }
   });
 });

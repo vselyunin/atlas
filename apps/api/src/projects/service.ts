@@ -142,7 +142,13 @@ async function confirmRepository(
   github: ProjectGithub,
   repositoryId: number,
 ): Promise<GithubRepository> {
-  const secrets = github.appFile.read();
+  let secrets: ReturnType<AppFile['read']>;
+  try {
+    secrets = github.appFile.read();
+  } catch {
+    // The error names the file's path; the answer does not.
+    throw new ApiError(502, 'github_unavailable', 'The GitHub App file is not readable');
+  }
   if (!secrets) throw new ApiError(409, 'setup_required', 'Atlas is not set up yet');
   let found: Awaited<ReturnType<GitHubClient['getRepositoryById']>>;
   try {

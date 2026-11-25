@@ -144,7 +144,7 @@ export function registerGateway(
               type: 'worker.registered',
               payload: { workerId, heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS },
             });
-            dispatchPending(context, registry, workerId, undefined, broker);
+            dispatchPending(context, registry, broker, workerId);
             return;
           }
           switch (message.type) {
@@ -169,7 +169,19 @@ export function registerGateway(
               break;
             case 'command.result':
               commandId = message.commandId;
-              applyResult(context, workerId, message);
+              try {
+                applyResult(context, workerId, message);
+              } catch (error) {
+                // A result the API rejects still ends the Worker's use of the credential, unless
+                // the command is unknown or belongs to another Worker.
+                if (
+                  !(error instanceof ApiError) ||
+                  (error.code !== 'operation_not_found' && error.code !== 'wrong_worker')
+                ) {
+                  void broker.release(commandId);
+                }
+                throw error;
+              }
               send({
                 protocolVersion: PROTOCOL_VERSION,
                 messageId: randomUUID(),

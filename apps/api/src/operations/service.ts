@@ -65,12 +65,13 @@ function commandPayload(
   return { kind: REPOSITORY_CLONE_CAPABILITY, projectId, relativePath, repository: link.fullName };
 }
 
+// The broker exists with sign-in off too (without GitHub), so a clone is always tracked.
 export function dispatchPending(
   context: ApiContext,
   registry: WorkerRegistry,
+  broker: CredentialBroker,
   workerId: string,
   operationId?: string,
-  broker?: CredentialBroker,
 ): void {
   const { db, now } = context;
   const worker = db.select().from(workers).where(eq(workers.id, workerId)).get();
@@ -107,7 +108,7 @@ export function dispatchPending(
       });
     if (dispatched && payload.kind === REPOSITORY_CLONE_CAPABILITY) {
       const socket = registry.socketOf(workerId);
-      if (socket) broker?.noteDispatch(operation.id, socket);
+      if (socket) broker.noteDispatch(operation.id, socket);
     }
     if (operation.connectionLost === dispatched) {
       db.update(operations)

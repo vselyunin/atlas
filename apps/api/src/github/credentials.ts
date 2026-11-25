@@ -2,7 +2,7 @@ import { CREDENTIAL_GRANT_WINDOW_MS, REPOSITORY_CLONE_CAPABILITY } from '@atlas/
 import type { CredentialGrant } from '@atlas/contracts';
 import { eq } from 'drizzle-orm';
 import type { FastifyBaseLogger } from 'fastify';
-import type WebSocket from 'ws';
+import WebSocket from 'ws';
 import type { ApiContext } from '../db/client.js';
 import { operations } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
@@ -22,6 +22,14 @@ const CLONE_RIGHTS_LABEL = 'contents:read';
 // The Worker waits CREDENTIAL_REPLY_TIMEOUT_MS (30 s) for a reply. GitHub is given at most this
 // long, so a slow GitHub ends in a refusal the Worker still receives.
 export const GITHUB_GRANT_BUDGET_MS = 20_000;
+
+// How long a granted token may be in use without a result: the Worker runs two Git processes with
+// the token, `ls-remote` and `fetch`, each limited to NETWORK_TIME_LIMIT_MS (30 minutes) in
+// apps/worker/src/repositories/clone.ts, plus a minute's margin. Keep the two in step.
+export const WORKER_GIT_BUDGET_MS = 2 * 30 * 60_000 + 60_000;
+
+// Requests per dispatch that may reach GitHub; later ones are refused without asking it.
+export const MAX_GITHUB_ATTEMPTS = 3;
 
 export type BrokerTimer = { clear(): void };
 export type BrokerTimers = { set(callback: () => void, ms: number): BrokerTimer };
@@ -51,6 +59,8 @@ type Dispatch = {
   dispatchedAt: number;
   // `requesting` while GitHub is asked: a second request in that time is refused too.
   state: 'open' | 'requesting' | 'granted' | 'expired';
+  attempts: number;
+  // The grant window: no grant is issued after it closes. It does not revoke a granted token.
   timer: BrokerTimer;
   ended?: Ending;
 };
@@ -69,13 +79,13 @@ const ENDING_REFUSAL: Record<Ending, () => ApiError> = {
 
 // Hands a Worker a short-lived token for one repository, read-only, for a clone the API
 // dispatched on that same connection, once per dispatch and within the grant window. Everything
-// here is in memory: a token is held only until it is revoked, on the command's result, when
-// the grant window closes, or when the API stops.
+// here is in memory. A granted token is held only to revoke it: on the command's result, when the
+// Worker's Git time limit has passed since the grant, when a newer grant replaces it, or when the
+// API stops.
 export class CredentialBroker {
   private readonly dispatches = new Map<string, Dispatch>();
-  // Tokens handed out per command and not yet revoked. They outlive a re-dispatch: a Worker that
-  // reconnected may still be fetching with the token it was given before.
-  private readonly held = new Map<string, Set<string>>();
+  // Tokens handed out per command and not yet revoked, each with its revocation timer.
+  private readonly held = new Map<string, Map<string, BrokerTimer>>();
   private readonly timers: BrokerTimers;
   private readonly budgetMs: number;
   private closed = false;
@@ -98,6 +108,7 @@ export class CredentialBroker {
       socket,
       dispatchedAt: this.now(),
       state: 'open',
+      attempts: 0,
       timer: { clear() {} },
     };
     dispatch.timer = this.timers.set(
@@ -199,8 +210,12 @@ export class CredentialBroker {
     if (!dispatch || dispatch.socket !== socket) {
       throw refusal('wrong_connection', 'The command was not dispatched on this connection');
     }
-    if (dispatch.state === 'requesting' || dispatch.state === 'granted') {
-      throw refusal('already_granted', 'A credential was already given for this dispatch');
+    if (
+      dispatch.state === 'requesting' ||
+      dispatch.state === 'granted' ||
+      dispatch.attempts >= MAX_GITHUB_ATTEMPTS
+    ) {
+      throw refusal('already_granted', 'A credential was already asked for on this dispatch');
     }
     if (
       dispatch.state === 'expired' ||
@@ -224,11 +239,21 @@ export class CredentialBroker {
     }
 
     dispatch.state = 'requesting';
+    dispatch.attempts += 1;
     try {
       const credential = await this.withinBudget(commandId, this.mint(commandId, link, github));
       if (dispatch.ended || this.dispatches.get(commandId) !== dispatch) {
         await this.drop(commandId, credential.token);
         throw ENDING_REFUSAL[dispatch.ended ?? 'redispatched']();
+      }
+      // A grant that cannot be delivered is revoked at once.
+      if (socket.readyState !== WebSocket.OPEN) {
+        await this.drop(commandId, credential.token);
+        throw refusal('wrong_connection', 'The connection closed before the credential was sent');
+      }
+      // This grant replaces the command's earlier ones; they are revoked without waiting.
+      for (const earlier of this.held.get(commandId)?.keys() ?? []) {
+        if (earlier !== credential.token) void this.drop(commandId, earlier);
       }
       dispatch.state = 'granted';
       return credential;
@@ -312,12 +337,13 @@ export class CredentialBroker {
     }
   }
 
+  // The window closed: no grant is issued from now on. A granted token keeps its own timer.
   private expire(commandId: string, dispatch: Dispatch) {
     if (this.dispatches.get(commandId) !== dispatch) return;
     dispatch.timer.clear();
+    if (dispatch.state === 'granted') return;
     dispatch.state = 'expired';
     dispatch.ended = 'expired';
-    void this.revokeHeld(commandId);
   }
 
   private hold(commandId: string, token: string) {
@@ -325,15 +351,21 @@ export class CredentialBroker {
       void this.revoke(token);
       return;
     }
-    const tokens = this.held.get(commandId) ?? new Set<string>();
-    tokens.add(token);
+    const tokens = this.held.get(commandId) ?? new Map<string, BrokerTimer>();
+    tokens.set(
+      token,
+      this.timers.set(() => void this.drop(commandId, token), WORKER_GIT_BUDGET_MS),
+    );
     this.held.set(commandId, tokens);
   }
 
-  // Revokes one token now, unless a release, the window or shutdown has revoked it already.
+  // Revokes one token now, unless a release, a newer grant or shutdown has revoked it already.
   private async drop(commandId: string, token: string) {
     const tokens = this.held.get(commandId);
-    if (!tokens?.delete(token)) return;
+    const timer = tokens?.get(token);
+    if (!tokens || !timer) return;
+    timer.clear();
+    tokens.delete(token);
     if (tokens.size === 0) this.held.delete(commandId);
     await this.revoke(token);
   }
@@ -342,12 +374,14 @@ export class CredentialBroker {
     const tokens = this.held.get(commandId);
     this.held.delete(commandId);
     if (!tokens) return;
-    await Promise.all([...tokens].map((token) => this.revoke(token)));
+    for (const timer of tokens.values()) timer.clear();
+    await Promise.all([...tokens.keys()].map((token) => this.revoke(token)));
   }
 
   private async revoke(token: string) {
     const client = this.options.github?.client;
-    // revokeToken never throws; a token it cannot revoke expires within an hour.
+    // revokeToken never throws and is bounded by the GitHub timeout; a token it cannot revoke
+    // expires within an hour.
     if (client && !(await client.revokeToken(token))) {
       this.options.log.warn('GitHub did not confirm a repository credential revocation');
     }
