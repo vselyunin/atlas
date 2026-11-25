@@ -7,9 +7,10 @@ export async function resolveTarget(root: string, path: string): Promise<string>
     path.includes('\0') ||
     path.includes('\\') ||
     isAbsolute(path) ||
-    path.split('/').some((part) => part === '..' || part === '.')
+    path.split('/').some((part) => part === '..' || part === '.') ||
+    path.startsWith('.')
   ) {
-    throw new Error('Choose a relative folder path without dot segments');
+    throw new Error('Choose a relative folder path without dot segments, not starting with a dot');
   }
   const canonical = await realpath(root);
   const target = resolve(canonical, path);

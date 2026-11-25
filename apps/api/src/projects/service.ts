@@ -61,6 +61,7 @@ export function createProject(
       const { workerId, relativePath } = input.repository;
       if (
         relativePath.includes('\\') ||
+        relativePath.startsWith('.') ||
         relativePath.split('/').includes('..') ||
         posix.normalize(relativePath).replace(/\/$/, '') === '.'
       ) {

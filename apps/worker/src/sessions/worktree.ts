@@ -4,6 +4,10 @@ import { join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { SessionStartPayload } from '@atlas/contracts';
 
+import { childEnvironment } from '../git-environment.js';
+
+export { childEnvironment };
+
 const run = promisify(execFile);
 const succeeds = (promise: Promise<unknown>) =>
   promise.then(
@@ -25,17 +29,6 @@ export interface Worktree {
 // The task id reduced to characters that are safe in folder, file and branch names.
 export function sessionKey(sessionId: string): string {
   return sessionId.replace(/[^a-zA-Z0-9-]/g, '') || 'task';
-}
-
-export function childEnvironment(root: string): Record<string, string> {
-  const env: Record<string, string> = {};
-  for (const [name, value] of Object.entries(process.env)) {
-    // Git hooks and the agent must not inherit the Worker token or other Atlas settings.
-    if (value !== undefined && !name.startsWith('ATLAS_')) env[name] = value;
-  }
-  // Git must never fall through to a repository above the workspace, such as the Atlas checkout.
-  env.GIT_CEILING_DIRECTORIES = root;
-  return env;
 }
 
 async function requireRealDirectory(path: string, label: string) {
