@@ -14,7 +14,8 @@ import { isLocalHost, validateOptions } from './config.js';
 import { openDatabase } from './db/client.js';
 import { AppFile } from './github/app-file.js';
 import { GitHubClient } from './github/client.js';
-import { registerGithubRoutes } from './github/routes.js';
+import { LinkService } from './github/links.js';
+import { registerGithubRoutes, registerGithubUnavailableRoutes } from './github/routes.js';
 import { ApiError, registerErrorHandlers } from './http/errors.js';
 import { loggerOptions } from './http/log.js';
 import { registerOperationRoutes } from './operations/routes.js';
@@ -111,7 +112,13 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     registerAuthRoutes(app, context, authSessions, auth, appFile);
     if (setup && appFile && github && auth) {
       registerSetupRoutes(app, setup, allowedOrigin);
-      registerGithubRoutes(app, appFile, github, auth.githubWebUrl);
+      registerGithubRoutes(
+        app,
+        appFile,
+        github,
+        auth.githubWebUrl,
+        new LinkService(context, appFile, github),
+      );
       const signin = new SignInService({
         context,
         appFile,
@@ -124,6 +131,8 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
         sessions.recheckUser(userId),
       );
       registerMemberRoutes(app, context, authSessions);
+    } else {
+      registerGithubUnavailableRoutes(app);
     }
     registerProjectRoutes(app, context, registry);
     registerVersionRoutes(app, context);
