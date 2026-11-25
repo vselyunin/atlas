@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import type { ReactNode } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { ChevronDown, Layers3, Plus } from 'lucide-react';
 import type { Project, Version } from '@atlas/contracts';
@@ -26,6 +27,8 @@ type BoardHeaderProps = {
   onCreateProject: () => void;
   onCreateVersion: () => void;
   onCreateTask: () => void;
+  // Replaces the default account menu while signed in.
+  user?: ReactNode;
 };
 
 function ResourceMenu({
@@ -91,8 +94,31 @@ function ResourceMenu({
   );
 }
 
-export function BoardHeader(props: BoardHeaderProps) {
+export function AppearanceRow() {
   const { preference, setPreference } = useTheme();
+  return (
+    <div className="appearance-row">
+      <label htmlFor="appearance">Appearance</label>
+      <div className="appearance-select">
+        <select
+          id="appearance"
+          value={preference}
+          onChange={(event) => {
+            const value = event.target.value;
+            if (value === 'system' || value === 'light' || value === 'dark') setPreference(value);
+          }}
+        >
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <ChevronDown size={14} aria-hidden="true" />
+      </div>
+    </div>
+  );
+}
+
+export function BoardHeader(props: BoardHeaderProps) {
   return (
     <header className="app-header">
       <a className="brand" href="/" aria-label="Atlas home">
@@ -131,45 +157,29 @@ export function BoardHeader(props: BoardHeaderProps) {
           <Plus size={16} />
           New task
         </button>
-        <Popover.Root>
-          <Popover.Trigger className="user-avatar" aria-label="User settings">
-            V
-          </Popover.Trigger>
-          <Popover.Portal>
-            <Popover.Content
-              className="dropdown-content user-menu"
-              align="end"
-              sideOffset={10}
-              collisionPadding={12}
-              aria-label="User settings"
-            >
-              <div className="user-identity">
-                <strong>Vladi</strong>
-                <span>Personal workspace</span>
-              </div>
-              <div className="dropdown-separator" />
-              <div className="appearance-row">
-                <label htmlFor="appearance">Appearance</label>
-                <div className="appearance-select">
-                  <select
-                    id="appearance"
-                    value={preference}
-                    onChange={(event) => {
-                      const value = event.target.value;
-                      if (value === 'system' || value === 'light' || value === 'dark')
-                        setPreference(value);
-                    }}
-                  >
-                    <option value="system">System</option>
-                    <option value="light">Light</option>
-                    <option value="dark">Dark</option>
-                  </select>
-                  <ChevronDown size={14} aria-hidden="true" />
+        {props.user ?? (
+          <Popover.Root>
+            <Popover.Trigger className="user-avatar" aria-label="User settings">
+              V
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                className="dropdown-content user-menu"
+                align="end"
+                sideOffset={10}
+                collisionPadding={12}
+                aria-label="User settings"
+              >
+                <div className="user-identity">
+                  <strong>Vladi</strong>
+                  <span>Personal workspace</span>
                 </div>
-              </div>
-            </Popover.Content>
-          </Popover.Portal>
-        </Popover.Root>
+                <div className="dropdown-separator" />
+                <AppearanceRow />
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
       </div>
     </header>
   );

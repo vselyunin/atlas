@@ -9,6 +9,13 @@ export class ApiError extends Error {
     super(message);
   }
 }
+// Called when the API says the session has ended, so the Board can ask who is signed in again.
+let signInRequiredHandler: (() => void) | undefined;
+export function onSignInRequired(handler: (() => void) | undefined) {
+  signInRequiredHandler = handler;
+}
+// For responses that carry no body (204).
+export const NoContent = { parse: (): void => undefined };
 export async function request<T>(
   path: string,
   schema: { parse(value: unknown): T },
@@ -21,6 +28,7 @@ export async function request<T>(
       ...options.headers,
     },
   });
+  if (response.status === 204) return schema.parse(undefined);
   let body: unknown;
   try {
     body = await response.json();
@@ -34,6 +42,8 @@ export async function request<T>(
   }
   if (!response.ok) {
     const parsed = ErrorResponseSchema.safeParse(body);
+    if (response.status === 401 && parsed.success && parsed.data.error.code === 'sign_in_required')
+      signInRequiredHandler?.();
     throw new ApiError(
       parsed.success ? parsed.data.error.message : 'The request could not be completed',
       response.status,

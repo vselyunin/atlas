@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Plus, Layers3 } from 'lucide-react';
 import type { Task, TaskStatus } from '@atlas/contracts';
+import { useAuthState } from './lib/auth';
+import { UserMenu } from './features/auth/UserMenu';
 import { useProjects, useVersions, useTasks, useWorkers } from './lib/queries';
 import { errorMessage } from './lib/api';
 import { BoardDnd } from './features/board/BoardDnd';
@@ -22,6 +24,7 @@ export function App() {
     setDialog('task');
   };
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const authUser = useAuthState().data?.user ?? null;
   const projects = useProjects();
   const workers = useWorkers();
   const project =
@@ -71,6 +74,7 @@ export function App() {
         onCreateProject={() => setDialog('project')}
         onCreateVersion={() => setDialog('version')}
         onCreateTask={() => createTask()}
+        user={authUser ? <UserMenu user={authUser} /> : undefined}
       />
       <main className="main-content" aria-label="Project board">
         {error && (
