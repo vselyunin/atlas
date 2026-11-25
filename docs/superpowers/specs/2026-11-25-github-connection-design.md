@@ -1,7 +1,7 @@
 # GitHub connection: sign-in and repository access
 
-Status: draft for the user's review, 2026-11-25. Revised the same day after an
-independent review; "Review record" at the end lists what changed.
+Status: approved by the user, 2026-11-25, as revised that day after an independent
+review; "Review record" at the end lists what changed.
 
 ## Intent and scope
 
