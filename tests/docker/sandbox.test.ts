@@ -70,6 +70,8 @@ describe('the agent sandbox in the Worker container', () => {
         'write-main-checkout': 'blocked',
         'write-other-worktree': 'blocked',
         'write-main-hooks': 'blocked',
+        'write-main-objects': 'blocked',
+        'replace-main-object': 'blocked',
         'write-main-config': 'blocked',
         'write-worktree-commondir': 'blocked',
         'write-worktree-gitdir': 'blocked',
@@ -101,6 +103,15 @@ describe('the agent sandbox in the Worker container', () => {
         AGENT_GIT_NAME,
         AGENT_GIT_EMAIL,
         'probe',
+      ]);
+      // The commit reached the project's object store through the Worker, and the store is sound.
+      await execute('git', [
+        '-c',
+        'safe.directory=*',
+        '-C',
+        join(stack.workspace, 'repo'),
+        'fsck',
+        '--strict',
       ]);
     },
     TEST_TIMEOUT_MS,

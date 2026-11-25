@@ -13,6 +13,7 @@ import type {
 } from '@atlas/contracts';
 import { resolveTarget } from '../repositories/paths.js';
 import { agentArgs, agentProfile } from './agents.js';
+import { startObjectSync } from './objects.js';
 import {
   SANDBOX_OFF_NOTICE,
   SANDBOX_ON_NOTICE,
@@ -48,10 +49,13 @@ interface PendingStart {
 export class SessionManager {
   private readonly sessions = new Map<string, Session>();
   private readonly pending = new Map<string, PendingStart>();
+  // Sessions whose agent has exited while the Worker still copies its last commits.
+  private readonly finishing = new Map<string, Promise<void>>();
   private readonly root: string;
   private readonly stateDir: string;
   private readonly agent: AgentSettings;
   private readonly stopGraceMs: number;
+  private readonly objectSyncMs: number;
   private queue: Promise<void> = Promise.resolve();
   private stopped = false;
   private excludes: Promise<string> | undefined;
@@ -59,12 +63,13 @@ export class SessionManager {
   constructor(
     config: WorkerConfig,
     private readonly emit: (event: SessionEvent) => void,
-    options: { stopGraceMs?: number } = {},
+    options: { stopGraceMs?: number; objectSyncMs?: number } = {},
   ) {
     this.root = config.root;
     this.stateDir = config.stateDir;
     this.agent = config.agent;
     this.stopGraceMs = options.stopGraceMs ?? 5_000;
+    this.objectSyncMs = options.objectSyncMs ?? 2_000;
   }
 
   start(payload: SessionStartPayload): Promise<void> {
@@ -79,6 +84,9 @@ export class SessionManager {
       });
       return Promise.resolve();
     }
+    // The earlier session of this task reports its exit first.
+    const finishing = this.finishing.get(sessionId);
+    if (finishing) return finishing.then(() => this.start(payload));
     if (this.stopped || this.pending.has(sessionId)) return Promise.resolve();
     const pending: PendingStart = { runId, cancelled: false };
     this.pending.set(sessionId, pending);
@@ -99,7 +107,7 @@ export class SessionManager {
       const worktree = await ensureWorktree(this.root, repository, payload);
       const { path, branch } = worktree;
       if (abandoned()) return exit(stoppedEarly);
-      const env = agentEnvironment(this.root, this.agent, await this.excludesFile());
+      const env = agentEnvironment(this.root, this.agent, await this.excludesFile(), worktree);
       if (abandoned()) return exit(stoppedEarly);
       const sandboxed = this.agent.sandbox === 'required';
       const [agentFile = 'claude'] = this.agent.command;
@@ -137,6 +145,8 @@ export class SessionManager {
       });
       const session: Session = { terminal, path, branch, runId };
       this.sessions.set(sessionId, session);
+      // The agent's commits are in its own object folder until the Worker copies them.
+      const objects = startObjectSync(this.root, worktree, this.objectSyncMs);
       this.emit({
         type: 'session.started',
         payload: { sessionId, runId, worktreePath: path, branch },
@@ -161,10 +171,20 @@ export class SessionManager {
       terminal.onExit(({ exitCode }) => {
         clearTimeout(session.killTimer);
         if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
-        this.emit({
-          type: 'session.exit',
-          payload: { sessionId, runId: session.runId, exitCode, message: null },
-        });
+        // The exit is reported once the last commits are copied, so they can be used right away.
+        const finished: Promise<void> = objects
+          .finish()
+          .then((message) => {
+            this.emit({
+              type: 'session.exit',
+              payload: { sessionId, runId: session.runId, exitCode, message },
+            });
+          })
+          .catch(() => {})
+          .finally(() => {
+            if (this.finishing.get(sessionId) === finished) this.finishing.delete(sessionId);
+          });
+        this.finishing.set(sessionId, finished);
       });
     } catch (error) {
       exit(error instanceof Error ? error.message : 'Could not start the session');
@@ -176,7 +196,9 @@ export class SessionManager {
   input(sessionId: string, runId: string, data: string): void {
     const session = this.sessions.get(sessionId);
     if (session) session.terminal.write(data);
-    else if (!this.pending.has(sessionId)) this.reportMissing(sessionId, runId);
+    else if (!this.pending.has(sessionId) && !this.finishing.has(sessionId)) {
+      this.reportMissing(sessionId, runId);
+    }
   }
 
   resize(sessionId: string, { cols, rows }: TerminalSize): void {
@@ -188,7 +210,8 @@ export class SessionManager {
     const pending = this.pending.get(sessionId);
     if (session) this.kill(session);
     else if (pending) pending.cancelled = true;
-    else this.reportMissing(sessionId, runId);
+    // A session that is finishing reports its own exit shortly.
+    else if (!this.finishing.has(sessionId)) this.reportMissing(sessionId, runId);
   }
 
   stopAll(): void {

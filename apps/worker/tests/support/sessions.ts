@@ -46,6 +46,7 @@ export function startPayload(
 export interface HarnessOptions {
   agentArgs?: string[];
   stopGraceMs?: number;
+  objectSyncMs?: number;
   sandbox?: 'required' | 'off';
   // Put first on PATH for the Worker and the processes it starts, for example to supply a fake srt.
   pathPrefix?: string;
@@ -79,7 +80,10 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
       events.push(event);
       for (const listener of [...listeners]) listener();
     },
-    options.stopGraceMs === undefined ? {} : { stopGraceMs: options.stopGraceMs },
+    {
+      ...(options.stopGraceMs === undefined ? {} : { stopGraceMs: options.stopGraceMs }),
+      ...(options.objectSyncMs === undefined ? {} : { objectSyncMs: options.objectSyncMs }),
+    },
   );
 
   const until = <T>(describe: string, probe: () => T | undefined): Promise<T> =>

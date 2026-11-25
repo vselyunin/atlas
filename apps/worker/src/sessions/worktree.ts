@@ -18,6 +18,8 @@ export interface Worktree {
   gitDir: string;
   // Absolute Git common dir of the main checkout.
   commonDir: string;
+  // The folder the agent's Git writes objects to, so the project's own objects stay read-only.
+  objectDir: string;
 }
 
 // The task id reduced to characters that are safe in folder, file and branch names.
@@ -115,12 +117,13 @@ export async function ensureWorktree(
     '--path-format=absolute',
     '--git-common-dir',
   ]);
-  const describe = async (path: string, branch: string): Promise<Worktree> => ({
-    path,
-    branch,
-    gitDir: await git(path, ['rev-parse', '--absolute-git-dir']),
-    commonDir,
-  });
+  const describe = async (path: string, branch: string): Promise<Worktree> => {
+    const gitDir = await git(path, ['rev-parse', '--absolute-git-dir']);
+    const objectDir = join(gitDir, 'objects');
+    // Git refuses to run with an object folder that does not exist.
+    await mkdir(objectDir, { recursive: true });
+    return { path, branch, gitDir, commonDir, objectDir };
+  };
   const reuse = async (path: string, branch: string) => {
     if (!(await succeeds(stat(path)))) return null;
     await requireLinkedWorktree(path, commonDir);

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AgentSettings } from '../config.js';
 import type { AgentProfile } from './agents.js';
+import { agentObjectEnvironment } from './objects.js';
 import { childEnvironment } from './worktree.js';
 import type { Worktree } from './worktree.js';
 
@@ -67,7 +68,7 @@ export function sandboxSettings(input: {
       denyRead: [input.stateDir],
       allowWrite: [
         worktree.path,
-        join(worktree.commonDir, 'objects'),
+        // Holds the agent's own object folder too. The project's object store is not writable.
         worktree.gitDir,
         // Task branches are named atlas/task-<id>, so agents can move only those branches.
         join(worktree.commonDir, 'refs', 'heads', 'atlas'),
@@ -85,8 +86,9 @@ export function agentEnvironment(
   root: string,
   agent: AgentSettings,
   excludesFile: string,
+  worktree: Worktree,
 ): Record<string, string> {
-  const env = childEnvironment(root);
+  const env = { ...childEnvironment(root), ...agentObjectEnvironment(worktree) };
   // An excludes file from the environment keeps the user's repository untouched.
   env.GIT_CONFIG_COUNT = '1';
   env.GIT_CONFIG_KEY_0 = 'core.excludesFile';

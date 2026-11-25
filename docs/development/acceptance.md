@@ -22,13 +22,15 @@ temporary data and separate ports, leaving the personal workspace untouched.
 
 ### Worker container and agent sandbox
 
-At the time of writing `pnpm check` runs 60 contract, 90 Worker, 28 API and 41 Board
+At the time of writing `pnpm check` runs 60 contract, 111 Worker, 28 API and 41 Board
 tests, plus 10 integration tests. They cover, with a stand-in agent and the sandbox off:
 
 - session message schemas and limits, and the two accepted capability lists;
 - Worker sessions and worktrees with real Git and a real PTY, the sandbox settings and
   agent arguments, required mode refusing to start without the sandbox, off mode running
   unwrapped, the Worker lock, the seccomp profile and the Worker configuration;
+- the agent's own Git object folder and the Worker's copy into the project's object store,
+  including refused forged objects and a commit usable in the project folder at session exit;
 - the API session hub and socket, and the Board session section and terminal;
 - API and Worker together through the Board socket: start, output, input, reattach,
   stop and reattach after an API restart.
@@ -36,7 +38,9 @@ tests, plus 10 integration tests. They cover, with a stand-in agent and the sand
 `pnpm test:docker` is a separate group of 6 tests. It needs Docker, no agent login, and is
 not part of `pnpm check`. It builds the image and registers the containerized Worker, runs
 a stand-in agent through the Board socket with the sandbox required, checks what the
-sandboxed agent can and cannot write, read and reach, checks that `git add -A` works, and
+sandboxed agent can and cannot write, read and reach (the project's Git object store is among
+the refused writes), checks that `git add -A` works and that the commit passes `git fsck` in
+the project folder, and
 checks that the default seccomp profile makes a required-mode session fail with no agent
 started. The coordinating agent ran the group after the last change and all 6 passed. Its
 stand-in agent does not create `.claude`, so it does not cover the two placeholders found in
@@ -83,7 +87,21 @@ agent's commands. The fix was independently re-reviewed, which confirmed the rep
 closed and added two important findings, both about limits that are now documented and not
 removed: other writable Git state in the worktree, and the writable shared object store. Its
 smaller findings on the fix were applied and those last changes were self-reviewed only. Ten
-minor findings from the pull request review remain open. Earlier work was reviewed by the
+minor findings from the pull request review remain open.
+
+The writable shared object store was then removed: each agent writes Git objects to a folder
+of its own and the Worker copies them into the project's store. One independent reviewer
+attacked the change with real Git, including hand-built packs, and confirmed that changed
+content cannot arrive under another object's name. It found no critical and three important
+issues: the Worker could be stalled through the task branch file, a session's exit could be
+lost while its last commits were copied, and the Worker's Git reads agent-written packs
+outside the sandbox. The first two were fixed and the third reduced and documented; these
+fixes were self-reviewed only. The reviewer did not check the real sandbox or the Docker
+tests; the coordinating agent ran those. Not done from its minor findings: a size limit on
+copied objects, a forged-pack test in the suite, and showing a failed copy while the session
+still runs. The change was not run with a real logged-in Claude.
+
+Earlier work was reviewed by the
 implementing agent only; an independent agent review of it was attempted but unavailable
 because the service usage limit was reached.
 

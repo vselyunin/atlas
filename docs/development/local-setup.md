@@ -74,7 +74,7 @@ The Worker wraps every agent in the sandbox runtime `@anthropic-ai/sandbox-runti
 `--cap-drop ALL` and `--security-opt no-new-privileges`. An agent can write only:
 
 - its task's worktree;
-- in the project's main checkout, `.git/objects`, `.git/worktrees/<this worktree>`,
+- in the project's main checkout, `.git/worktrees/<this worktree>`,
   `.git/refs/heads/atlas` and `.git/logs`;
 - its own login and state paths. For Claude these are `~/.claude`, `~/.claude.json` and
   `/tmp/claude`. The Worker creates the folders (`~/.claude` and `/tmp/claude`) before it
@@ -112,8 +112,35 @@ and the worktree itself are writable for the agent. Examples: a planted rebase i
 whose steps run commands when you continue it, a nested repository inside the worktree, and a
 project that keeps its Git hooks in the working tree.
 
-The project's Git object store is writable for the agent too, so it can replace stored file
-contents, including those of `main`. `git fsck` in the project folder reports such a change.
+The agent cannot write to the project's Git object store (`.git/objects`), so it cannot change
+or replace stored file contents, including those of `main`. It still decides which new objects
+the Worker adds there, so it can fill the store with objects of its own. Its own commits go to an object folder of its
+own, `.git/worktrees/<this worktree>/objects`, which the Worker sets through the agent's
+environment (`GIT_OBJECT_DIRECTORY` and `GIT_ALTERNATE_OBJECT_DIRECTORIES`). The Worker copies
+the task branch's new objects into the project's store about every two seconds while the branch
+moves, and once more when the session ends, before the Board shows it as ended. Git names every
+copied object by its content again, so changed content cannot arrive under another object's
+name. What this means in use:
+
+- Right after an agent commits, `git log atlas/task-<id>` in the project folder can fail with
+  `bad object` for a moment. Commands that read every branch, such as `git gc` or
+  `git branch -v`, can report the same until the copy is done.
+- If a copy fails while the session runs, nothing is shown and the branch stays unusable in
+  the project folder until a later copy works. If the last copy fails, the session ends with
+  "The agent's commits could not be copied into the project repository" and the cause. The
+  commits are then still in the agent's object folder.
+- Git run on the host inside the task worktree does not see the agent's object folder, so it
+  reports missing objects for files the agent staged or committed there. Look at the work from
+  the project folder, as described above.
+- The Worker's Git reads the packs and loose objects the agent wrote, outside the sandbox. It
+  checks every object before storing it, but a fault in Git's own reading of a crafted pack
+  would not be contained.
+- If the Worker is killed before the last copy, the next session for the task copies them.
+  Deleting the task's worktree before that loses them.
+- Only the task branch is copied. Other branches an agent creates under `atlas/` stay unusable
+  in the project folder.
+- The two variables apply to every Git command the agent runs, also in a repository it creates
+  or clones inside the worktree, whose objects then land in the agent's object folder.
 
 Codex is in the image but has not been verified under the sandbox. Treat it as unverified.
 
@@ -141,8 +168,8 @@ the agent commits.
   task's agent could read the credentials or change the agent settings used by
   the others.
 - An agent can read other tasks' worktrees and the main checkout.
-- An agent can move or delete another task's `atlas/` branch pointer and can
-  damage the shared Git object store.
+- An agent can move or delete another task's `atlas/` branch pointer. It cannot change or
+  replace objects in the project's Git object store.
 - The six extra system calls (`clone`, `clone3`, `unshare`, `mount`, `umount2`,
   `pivot_root`) are among the more sensitive ones Docker blocks by default. The
   narrow profile is tighter than no filter and looser than Docker's default.

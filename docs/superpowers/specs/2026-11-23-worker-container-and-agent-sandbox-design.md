@@ -411,6 +411,20 @@ UI works on the Board with permission prompts off.
   replacing a stored object with other content under the same name, so files
   checked out from `main` can change (reproduced in review). `git fsck`
   reports it. Closing this needs a separate object folder per agent.
+- Changed 2026-11-25: that separate folder now exists, so the two statements
+  above about the shared object store no longer hold, and `.git/objects` is no
+  longer in the agent's writable paths. The agent's Git writes objects to
+  `.git/worktrees/<this worktree>/objects` (through `GIT_OBJECT_DIRECTORY`) and
+  reads the project's store through `GIT_ALTERNATE_OBJECT_DIRECTORIES`. The
+  Worker copies the task branch's new objects into the project's store when the
+  branch moves and when the session ends, with `git pack-objects` piped into
+  `git unpack-objects`, which names each object by its content again, and then
+  checks that the branch is complete there. What remains: between an agent's
+  commit and the copy (about two seconds), and for good if the Worker is killed
+  before the last copy or the copy fails, the task branch in the project
+  repository points at a commit that repository does not have; an agent can
+  also still move or delete `atlas/` branch pointers. Only the task branch is
+  copied, not other branches an agent creates under `atlas/`.
 
 ## Deferred: isolating agent logins
 

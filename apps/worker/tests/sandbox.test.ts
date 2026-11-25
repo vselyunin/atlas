@@ -119,6 +119,7 @@ describe('sandboxSettings', () => {
       branch: 'atlas/task-1',
       gitDir: '/srv/my repos/my app/.git/worktrees/task 1',
       commonDir: '/srv/my repos/my app/.git',
+      objectDir: '/srv/my repos/my app/.git/worktrees/task 1/objects',
     };
 
     const settings = sandboxSettings({
@@ -145,7 +146,6 @@ describe('sandboxSettings', () => {
         denyRead: ['/srv/worker state'],
         allowWrite: [
           '/srv/my repos/.atlas-worktrees/my%20app/task 1',
-          '/srv/my repos/my app/.git/objects',
           '/srv/my repos/my app/.git/worktrees/task 1',
           '/srv/my repos/my app/.git/refs/heads/atlas',
           '/srv/my repos/my app/.git/logs',
@@ -190,10 +190,24 @@ describe('sandboxSettings', () => {
 
 describe('agentEnvironment', () => {
   const agent = { command: ['claude'], sandbox: 'required' as const, allowedDomains: [] };
+  const worktree: Worktree = {
+    path: '/srv/repos/.atlas-worktrees/app/task-1',
+    branch: 'atlas/task-1',
+    gitDir: '/srv/repos/app/.git/worktrees/task-1',
+    commonDir: '/srv/repos/app/.git',
+    objectDir: '/srv/repos/app/.git/worktrees/task-1/objects',
+  };
+
+  it("sends the agent's Git objects to its own folder and reads the project's", () => {
+    expect(agentEnvironment('/srv/repos', agent, '/tmp/excludes', worktree)).toMatchObject({
+      GIT_OBJECT_DIRECTORY: '/srv/repos/app/.git/worktrees/task-1/objects',
+      GIT_ALTERNATE_OBJECT_DIRECTORIES: '/srv/repos/app/.git/objects',
+    });
+  });
 
   it('hides Atlas settings and points Git at the excludes file', () => {
     vi.stubEnv('ATLAS_WORKER_TOKEN', 'must-not-leak');
-    const env = agentEnvironment('/srv/repos', agent, '/tmp/excludes');
+    const env = agentEnvironment('/srv/repos', agent, '/tmp/excludes', worktree);
     expect(Object.keys(env).filter((name) => name.startsWith('ATLAS_'))).toEqual([]);
     expect(env).toMatchObject({
       GIT_CEILING_DIRECTORIES: '/srv/repos',
@@ -218,6 +232,7 @@ describe('agentEnvironment', () => {
       '/srv/repos',
       { ...agent, gitName: 'Ada', gitEmail: 'ada@example.com' },
       '/tmp/x',
+      worktree,
     );
     expect(both).toMatchObject({
       GIT_AUTHOR_NAME: 'Ada',
@@ -227,7 +242,7 @@ describe('agentEnvironment', () => {
     });
 
     for (const partial of [{ gitName: 'Ada' }, { gitEmail: 'ada@example.com' }]) {
-      const env = agentEnvironment('/srv/repos', { ...agent, ...partial }, '/tmp/x');
+      const env = agentEnvironment('/srv/repos', { ...agent, ...partial }, '/tmp/x', worktree);
       expect(identityNames.filter((name) => name in env)).toEqual([]);
     }
   });
@@ -249,9 +264,12 @@ describe('writeExcludesFile', () => {
   });
 
   it('makes Git ignore the placeholders without touching the repository', async () => {
-    const repo = join(directory, 'app');
-    await mkdir(repo);
-    await git(repo, 'init', '--quiet', '-b', 'main');
+    const main = join(directory, 'app');
+    await mkdir(main);
+    await git(main, 'init', '--quiet', '-b', 'main');
+    await git(main, 'commit', '--quiet', '--allow-empty', '-m', 'chore: seed');
+    const worktree = await ensureWorktree(directory, main, startPayload(randomUUID(), 'app'));
+    const repo = worktree.path;
     await mkdir(join(repo, '.claude'));
     for (const name of PLACEHOLDER_NAMES) await writeFile(join(repo, name), '');
     await writeFile(join(repo, 'real.txt'), 'kept');
@@ -261,6 +279,7 @@ describe('writeExcludesFile', () => {
         directory,
         { command: ['claude'], sandbox: 'required', allowedDomains: [] },
         path,
+        worktree,
       );
       const status = await run('git', ['status', '--porcelain', '--untracked-files=all'], {
         cwd: repo,

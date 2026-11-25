@@ -85,6 +85,13 @@ const replace = async (path) => {
   }
   await rename(`${path}.moved`, path);
 };
+// The project's object store: the agent's own objects go to a folder of its own.
+await probe('write-main-objects', () => writeFile(join(commonDir, 'objects', 'probe'), 'probe\n'));
+await probe('replace-main-object', async () => {
+  // The commit the task branch started from, which the project's store holds as a file.
+  const name = await git('rev-parse', 'HEAD~1');
+  await replace(join(commonDir, 'objects', name.slice(0, 2), name.slice(2)));
+});
 await probe('replace-worktree-commondir', () => replace(join(gitDir, 'commondir')));
 // The pointer from the task folder to its Git folder; the sandbox runtime protects it by itself.
 await probe('write-worktree-dotgit', async () => (await open(join(cwd, '.git'), 'a')).close());
