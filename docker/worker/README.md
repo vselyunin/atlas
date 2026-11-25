@@ -24,6 +24,18 @@ Pinned agent tools, installed globally:
 Git, bubblewrap, socat and ripgrep come from Debian bookworm. The system Git config sets
 `safe.directory = *` because the mounted workspace belongs to the host user.
 
+## Git version and clone flaws
+
+Checked on 2026-11-25 for repository cloning: the image's Git is `2.39.5`, Debian package
+`1:2.39.5-0+deb12u3`, which was also the bookworm candidate that day. Debian's changelog
+(`apt-get changelog git`; the slim image does not ship it) lists the backported fixes for the known
+clone flaws: CVE-2024-32002, CVE-2024-32004, CVE-2024-32020 and CVE-2024-32021 (`deb12u1`),
+CVE-2024-50349 and CVE-2024-52006 in the credential protocol (`deb12u2`), and CVE-2025-48384 and
+CVE-2025-48385 (`deb12u3`). The image is not affected by those. The Worker's clone also avoids their
+triggers: it never recurses into submodules or clones from a local path, builds the address from a
+validated `owner/name`, answers credentials only through its own helper for the configured host,
+and runs every Git step with hooks off. Rebuilding the image picks up later Debian fixes.
+
 ## Seccomp profile
 
 The agent sandbox uses bubblewrap, which needs `clone`, `clone3`, `unshare`, `mount`, `umount2` and

@@ -1,0 +1,18 @@
+{
+  "command": {
+    "protocolVersion": 1,
+    "messageId": "message:dispatch",
+    "type": "command.dispatch",
+    "commandId": "operation:before-clone",
+    "payload": {
+      "kind": "repository.init",
+      "projectId": "project:example",
+      "relativePath": "project"
+    }
+  },
+  "target": "/workspace/projects/project",
+  "stage": "finished",
+  "identity": { "dev": 2080, "ino": 131074 },
+  "outcome": { "status": "succeeded", "localPath": "/workspace/projects/project" },
+  "acknowledged": false
+}

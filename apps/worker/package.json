@@ -7,7 +7,7 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "node ../../scripts/run-package.mjs typecheck tsc --noEmit",
     "test": "node ../../scripts/run-package.mjs test vitest run",
-    "build": "node ../../scripts/run-package.mjs build tsc -p tsconfig.build.json",
+    "build": "node ../../scripts/run-package.mjs build tsc -p tsconfig.build.json && node -e \"require('node:fs').copyFileSync('src/repositories/git-credential-helper.sh', 'dist/repositories/git-credential-helper.sh')\"",
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "start": "node --env-file-if-exists=.env dist/main.js"
   },

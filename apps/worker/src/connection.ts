@@ -8,9 +8,11 @@ import {
   RECONNECT_INITIAL_DELAY_MS,
   RECONNECT_MAX_DELAY_MS,
 } from '@atlas/contracts';
-import type { WorkerToApiMessage, RepositoryInitCommand } from '@atlas/contracts';
+import type { ApiToWorkerMessage, CommandDispatch, WorkerToApiMessage } from '@atlas/contracts';
 import type { WorkerConfig } from './config.js';
 import type { Journal } from './state/journal.js';
+import { cloneRepository } from './repositories/clone.js';
+import { CredentialExchange } from './repositories/credential.js';
 import { initializeRepository } from './repositories/initialize.js';
 import { SessionManager } from './sessions/manager.js';
 
@@ -27,11 +29,19 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
   let registered = false;
   let attempts = 0;
   let queue = Promise.resolve();
-  const active = new Map<string, RepositoryInitCommand>();
+  const active = new Map<string, CommandDispatch>();
+  // Ended when the Worker stops, so a running clone does not hold up shutdown.
+  const running = new AbortController();
   const send = (message: WorkerToApiMessage) => {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   };
   const envelope = () => ({ protocolVersion: 1 as const, messageId: randomUUID() });
+  // Pending credential requests by command ID. Requests are sent only on a registered connection.
+  const credentials = new CredentialExchange((commandId) => {
+    if (!registered || socket?.readyState !== WebSocket.OPEN) return false;
+    send({ ...envelope(), type: 'credential.request', commandId, payload: {} });
+    return true;
+  });
   // Spike: output produced while disconnected is dropped.
   const sessions = new SessionManager(config, (event) => send({ ...envelope(), ...event }));
   const replay = () => {
@@ -45,7 +55,7 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
         });
     }
   };
-  const dispatch = (command: RepositoryInitCommand) => {
+  const dispatch = (command: CommandDispatch) => {
     if (stopped) return;
     const pending = active.get(command.commandId);
     if (pending) {
@@ -65,7 +75,7 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
     active.set(command.commandId, command);
     queue = queue.then(async () => {
       try {
-        const outcomePromise = initializeRepository(command, {
+        const context = {
           root: config.root,
           journal,
           onAccepted: () => {
@@ -77,9 +87,21 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
                 payload: {},
               });
           },
-        });
-        // initializeRepository persists intent before the first filesystem mutation.
-        const outcome = await outcomePromise;
+        };
+        const { payload } = command;
+        // Both commands persist intent before the first filesystem mutation.
+        const outcome =
+          payload.kind === 'repository.init'
+            ? await initializeRepository({ ...command, payload }, context)
+            : await cloneRepository(
+                { ...command, payload },
+                {
+                  ...context,
+                  gitHostUrl: config.gitHostUrl,
+                  requestCredential: credentials.request,
+                  signal: running.signal,
+                },
+              );
         if (registered)
           send({
             ...envelope(),
@@ -119,14 +141,22 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           workerId: config.id,
           name: config.name,
           workspaceRoot: config.root,
-          capabilities: ['repository.init', 'agent.session'],
+          capabilities: ['repository.init', 'agent.session', 'repository.clone'],
         },
       });
     });
     current.on('message', (data, binary) => {
+      let message: ApiToWorkerMessage;
       try {
         if (binary) throw new Error('Only JSON text is supported');
-        const message = ApiToWorkerMessageSchema.parse(JSON.parse(text(data)));
+        message = ApiToWorkerMessageSchema.parse(JSON.parse(text(data)));
+      } catch {
+        // Parse errors can quote the message text, which may carry a credential: never log them.
+        console.error('Invalid API message');
+        current.close(1008);
+        return;
+      }
+      try {
         if (message.type === 'worker.registered') {
           if (message.payload.workerId !== config.id) throw new Error('Worker identity mismatch');
           registered = true;
@@ -140,21 +170,12 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           console.log(`Worker ${config.name} connected`);
         } else if (message.type === 'command.dispatch') {
           if (!registered) throw new Error('Registration required');
-          const { payload } = message;
-          if (payload.kind === 'repository.init') {
-            dispatch({ ...message, payload });
-          } else {
-            // This Worker does not advertise repository.clone yet.
-            send({
-              ...envelope(),
-              type: 'protocol.error',
-              commandId: message.commandId,
-              payload: {
-                code: 'command_unsupported',
-                message: `Unsupported command: ${payload.kind}`,
-              },
-            });
-          }
+          dispatch(message);
+        } else if (message.type === 'credential.grant') {
+          // Unknown or late grants are dropped; the token is never logged.
+          if (registered) credentials.grant(message.commandId, message.payload);
+        } else if (message.type === 'credential.refusal') {
+          if (registered) credentials.refuse(message.commandId, message.payload);
         } else if (message.type === 'command.result_ack') {
           if (registered) journal.acknowledge(message.commandId);
         } else if (message.type === 'session.start') {
@@ -181,6 +202,8 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
     current.on('close', () => {
       registered = false;
       clearInterval(heartbeat);
+      // A grant can only come over the connection that carried the request.
+      credentials.dropAll();
       if (!stopped) {
         const delay = Math.min(
           RECONNECT_MAX_DELAY_MS,
@@ -196,6 +219,8 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
       stopped = true;
       clearTimeout(timer);
       clearInterval(heartbeat);
+      // End a running clone first; it reports needs_attention instead of holding up shutdown.
+      running.abort();
       await queue;
       sessions.stopAll();
       registered = false;

@@ -19,6 +19,7 @@ const optionalVariables = [
   'ATLAS_AGENT_ALLOWED_DOMAINS',
   'ATLAS_AGENT_GIT_NAME',
   'ATLAS_AGENT_GIT_EMAIL',
+  'ATLAS_GIT_HOST_URL',
 ];
 const dockerStartTimeout = 20_000;
 const dockerPollInterval = 500;
