@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CREDENTIAL_GRANT_WINDOW_MS } from '@atlas/contracts';
+import { CREDENTIAL_GRANT_WINDOW_MS, CREDENTIAL_REPLY_TIMEOUT_MS } from '@atlas/contracts';
 import type { FastifyBaseLogger } from 'fastify';
 import WebSocket from 'ws';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -284,6 +284,45 @@ describe('the credential broker over the Worker socket', { timeout: 30_000 }, ()
       payload: { code: 'already_granted' },
     });
     expect(contentsTokenRequests()).toHaveLength(1);
+  });
+
+  it("does not let one Worker revoke another's token", async () => {
+    const fake = await worker();
+    const dispatch = await dispatchedClone(fake);
+    const reply = await fake.requestCredential(dispatch.commandId);
+    if (reply.type !== 'credential.grant') throw new Error('Expected a grant');
+    const { token } = reply.payload;
+    const other = await worker({ workerId: 'atlas:other', workspaceRoot: '/tmp/atlas-other' });
+
+    other.send({
+      type: 'command.result',
+      commandId: dispatch.commandId,
+      payload: { status: 'failed', error: { code: 'clone_failed', message: 'Clone failed' } },
+    });
+    expect(await other.next('protocol.error')).toMatchObject({
+      commandId: dispatch.commandId,
+      payload: { code: 'wrong_worker' },
+    });
+    other.send({
+      type: 'command.result',
+      commandId: 'no-such-command',
+      payload: { status: 'failed', error: { code: 'clone_failed', message: 'Clone failed' } },
+    });
+    expect(await other.next('protocol.error')).toMatchObject({
+      commandId: 'no-such-command',
+      payload: { code: 'operation_not_found' },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(revocations(token)).toEqual([]);
+    expect(github.state.installationTokens.has(token)).toBe(true);
+
+    fake.send({
+      type: 'command.result',
+      commandId: dispatch.commandId,
+      payload: { status: 'succeeded', localPath: '/tmp/atlas-test/repo' },
+    });
+    await fake.next('command.result_ack');
+    await until(() => revocations(token).length === 1);
   });
 
   it('revokes the token when the API rejects the result', async () => {
@@ -573,6 +612,8 @@ describe('the credential broker', { timeout: 30_000 }, () => {
     if (!late) throw new Error('Expected the stand-in to have minted a token');
     const budget = timers.find((timer) => timer.ms === GITHUB_GRANT_BUDGET_MS && !timer.cleared);
     expect(budget).toBeDefined();
+    // The refusal must reach the Worker before it stops waiting.
+    expect(GITHUB_GRANT_BUDGET_MS).toBeLessThan(CREDENTIAL_REPLY_TIMEOUT_MS);
     advance(GITHUB_GRANT_BUDGET_MS);
     const refused = await asked.catch((error: unknown) => error);
     expect(refused).toBeInstanceOf(ApiError);
