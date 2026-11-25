@@ -51,9 +51,17 @@ export const RepositorySchema = z.discriminatedUnion('mode', [
   LocalRepositoryCreateSchema.extend({ localPath: z.string().nullable() }),
 ]);
 
+// Only the create form carries the GitHub repository ID. The stored shape does not.
+const LocalRepositoryCreateRequestSchema = LocalRepositoryCreateSchema.extend({
+  githubRepositoryId: z.int().positive().optional(),
+});
+
 export const ProjectCreateSchema = z.strictObject({
   name: NameSchema,
-  repository: z.discriminatedUnion('mode', [ExistingRepositorySchema, LocalRepositoryCreateSchema]),
+  repository: z.discriminatedUnion('mode', [
+    ExistingRepositorySchema,
+    LocalRepositoryCreateRequestSchema,
+  ]),
 });
 
 export const ProjectStateSchema = z.enum(['pending', 'ready', 'failed', 'needs_attention']);

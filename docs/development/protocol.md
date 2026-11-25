@@ -110,7 +110,7 @@ All messages use protocol version `1`. Command messages require a nonempty `comm
 | Worker → API | `worker.register`    | `{workerId,name,workspaceRoot,capabilities}`; see [capabilities](#capabilities)                   |
 | API → Worker | `worker.registered`  | `{workerId,heartbeatIntervalMs:10000}`                                                            |
 | Worker → API | `worker.heartbeat`   | `{workerId}`                                                                                      |
-| API → Worker | `command.dispatch`   | `{kind:"repository.init",projectId,relativePath}`                                                 |
+| API → Worker | `command.dispatch`   | `{kind:"repository.init",projectId,relativePath}` or the [clone form](#clone-and-credentials)     |
 | Worker → API | `command.accepted`   | `{}`                                                                                              |
 | Worker → API | `command.result`     | `{status:"succeeded",localPath}` or `{status:"failed" \| "needs_attention",error:{code,message}}` |
 | API → Worker | `command.result_ack` | `{}`                                                                                              |
@@ -126,7 +126,32 @@ The API redispatches unresolved commands with their original IDs after reconnect
 
 ### Capabilities
 
-A Worker registers with `["repository.init"]` or `["repository.init","agent.session"]`. The API rejects any other list. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it.
+A Worker registers with `["repository.init"]`, `["repository.init","agent.session"]` or `["repository.init","agent.session","repository.clone"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it. The third form was added with cloning.
+
+Compatibility in both directions:
+
+- An older API refuses a newer Worker's registration, because its validator does not know the third list. Update the API before the Worker.
+- A newer API accepts an older Worker. It never sends a worker without `repository.clone` a clone command or a credential message.
+
+### Clone and credentials
+
+The clone command is a `command.dispatch` whose payload is `{kind:"repository.clone",projectId,relativePath,repository}`. `repository` is a GitHub full name such as `team/project`, never a URL, and the payload is strict, so a `token` field is rejected: the credential never travels inside the command. The Worker answers with the usual `command.accepted` and `command.result`.
+
+The Worker asks for a credential when it needs one, over the same connection.
+
+| Direction    | Type                 | Payload                                                     |
+| ------------ | -------------------- | ----------------------------------------------------------- |
+| Worker → API | `credential.request` | `{}`; the `commandId` names the clone                       |
+| API → Worker | `credential.grant`   | `{token,expiresAt,repository}`                              |
+| API → Worker | `credential.refusal` | `{code,message}`; the `commandId` is the one that was asked |
+
+The API grants a credential only for a clone it dispatched to that Worker, for the repository in that command, and only within 900,000 ms (15 minutes) after dispatch. The Worker waits at most 30,000 ms for a reply. The token is short-lived, is held in memory and is never written to the database, the Worker journal, a Git configuration, a command line or a log.
+
+Until the Worker handles clones it answers a clone dispatch with a `protocol.error` carrying the command ID and does not register `repository.clone`.
+
+### Project creation
+
+The `local` repository form of `POST /projects` accepts an optional `githubRepositoryId` (positive integer). The `existing` form rejects it. Stored projects and `Repository` responses do not carry it. Older strict validators reject the field, so deploy the updated API before a Board that sends it.
 
 ## Agent sessions
 

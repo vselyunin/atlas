@@ -140,7 +140,21 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           console.log(`Worker ${config.name} connected`);
         } else if (message.type === 'command.dispatch') {
           if (!registered) throw new Error('Registration required');
-          dispatch(message);
+          const { payload } = message;
+          if (payload.kind === 'repository.init') {
+            dispatch({ ...message, payload });
+          } else {
+            // This Worker does not advertise repository.clone yet.
+            send({
+              ...envelope(),
+              type: 'protocol.error',
+              commandId: message.commandId,
+              payload: {
+                code: 'command_unsupported',
+                message: `Unsupported command: ${payload.kind}`,
+              },
+            });
+          }
         } else if (message.type === 'command.result_ack') {
           if (registered) journal.acknowledge(message.commandId);
         } else if (message.type === 'session.start') {
