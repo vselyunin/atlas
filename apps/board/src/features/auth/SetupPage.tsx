@@ -4,12 +4,23 @@ import { Layers3 } from 'lucide-react';
 import { SetupStartResponseSchema } from '@atlas/contracts';
 import type { AuthStateResponse, SetupStartResponse } from '@atlas/contracts';
 import { NoContent, errorMessage, request } from '../../lib/api';
-import { SIGN_IN_PATH, authKey, setupFailureMessage, signInFailureMessage } from '../../lib/auth';
+import {
+  SIGN_IN_PATH,
+  authKey,
+  isWebUrl,
+  setupFailureMessage,
+  signInFailureMessage,
+} from '../../lib/auth';
 import type { AuthOutcome } from '../../lib/auth';
 
 // Sends the browser to GitHub with the manifest, as GitHub's manifest flow requires: a form
 // post that navigates away from the Board.
 function postManifest({ action, manifest }: SetupStartResponse) {
+  if (!isWebUrl(action)) {
+    throw new Error(
+      'Atlas could not open GitHub: the address it received is not valid. Try again.',
+    );
+  }
   const form = document.createElement('form');
   form.method = 'post';
   form.action = action;
@@ -73,7 +84,7 @@ function StartStep({ outcome }: { outcome: AuthOutcome }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!start.isPending) start.mutate();
+          if (!start.isPending && !start.isSuccess) start.mutate();
         }}
       >
         <label>
@@ -95,8 +106,8 @@ function StartStep({ outcome }: { outcome: AuthOutcome }) {
           </p>
         )}
         <div className="form-actions">
-          <button className="button primary" disabled={start.isPending}>
-            {start.isPending ? 'Opening GitHub…' : 'Create the GitHub App'}
+          <button className="button primary" disabled={start.isPending || start.isSuccess}>
+            {start.isPending || start.isSuccess ? 'Opening GitHub…' : 'Create the GitHub App'}
           </button>
         </div>
       </form>
@@ -139,7 +150,7 @@ function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: A
         </p>
       )}
       <div className="auth-actions">
-        {app && (
+        {app && isWebUrl(app.installUrl) && (
           <a className="button secondary" href={app.installUrl}>
             Install the App on GitHub
           </a>

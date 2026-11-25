@@ -27,6 +27,16 @@ export function useSignInRequiredRefresh() {
   }, [client]);
 }
 
+// Links and form posts only go to web addresses the API reported, never to other schemes.
+export function isWebUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value);
+    return protocol === 'https:' || protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
 export type AuthOutcome = {
   setupFailure?: string;
   signInFailure?: string;
@@ -42,7 +52,8 @@ export function readAuthOutcome(search: string): AuthOutcome {
   if (query.get('signin') === 'failed') {
     outcome.signInFailure = reason;
     const login = query.get('login');
-    if (login) outcome.login = login;
+    // Shown in a sentence, so only a real GitHub login is accepted.
+    if (login && /^[A-Za-z0-9-]{1,39}$/.test(login)) outcome.login = login;
   }
   return outcome;
 }

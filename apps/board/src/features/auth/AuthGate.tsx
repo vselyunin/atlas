@@ -18,7 +18,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </main>
     );
   }
-  if (auth.isError) {
+  // A failed refetch keeps the last data: the Board stays mounted rather than losing its state.
+  if (auth.isError && !auth.data) {
     return (
       <main className="auth-page">
         <div className="auth-card">
@@ -35,6 +36,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
   const state = auth.data;
+  if (!state) return null;
   if (state.auth === 'off') {
     return (
       <>

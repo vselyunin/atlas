@@ -45,6 +45,7 @@ function renderGate() {
       </AuthGate>
     </QueryClientProvider>,
   );
+  return client;
 }
 
 beforeEach(() => window.history.replaceState({}, '', '/'));
@@ -149,4 +150,96 @@ it('shows the board with a notice when sign-in is off', async () => {
   expect(await screen.findByText('The board')).toBeTruthy();
   const notice = screen.getByRole('status');
   expect(notice.textContent).toContain('Sign-in is off');
+});
+
+it('keeps the board mounted when a later refetch of the auth state fails', async () => {
+  let failing = false;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() =>
+      Promise.resolve(
+        failing
+          ? respond({ error: { code: 'down', message: 'The API is restarting' } }, 503)
+          : respond({
+              auth: 'github',
+              setup: 'done',
+              user: owner,
+              app,
+            } satisfies AuthStateResponse),
+      ),
+    ),
+  );
+  const client = renderGate();
+  expect(await screen.findByText('The board')).toBeTruthy();
+  failing = true;
+  await client.refetchQueries({ queryKey: ['auth'] });
+  await waitFor(() => expect(client.getQueryState(['auth'])?.status).toBe('error'));
+  expect(screen.getByText('The board')).toBeTruthy();
+  expect(screen.queryByRole('alert')).toBeNull();
+});
+
+it('shows an error page with a retry control when the first load fails', async () => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() =>
+      Promise.resolve(respond({ error: { code: 'down', message: 'The API is down' } }, 503)),
+    ),
+  );
+  renderGate();
+  expect((await screen.findByRole('alert')).textContent).toContain('The API is down');
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  expect(screen.queryByText('The board')).toBeNull();
+});
+
+it('does not render a crafted login from the address', async () => {
+  window.history.replaceState(
+    {},
+    '',
+    '/?signin=failed&reason=no_access&login=' + encodeURIComponent('visit evil.example now'),
+  );
+  stubApi({ auth: 'github', setup: 'done', user: null, app: null });
+  renderGate();
+  const alert = await screen.findByRole('alert');
+  expect(alert.textContent).toContain('no access');
+  expect(alert.textContent).not.toContain('evil.example');
+});
+
+it('refuses to post the manifest to a non-web address', async () => {
+  const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => undefined);
+  stubApi({ auth: 'github', setup: 'needed', user: null, app: null }, (path) =>
+    path === '/api/v1/setup/github/start'
+      ? respond({ action: 'javascript:alert(1)', manifest: '{}' })
+      : undefined,
+  );
+  renderGate();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'Create the GitHub App' }));
+  expect((await screen.findByRole('alert')).textContent).toContain('not valid');
+  expect(submit).not.toHaveBeenCalled();
+});
+
+it('keeps the start button disabled once the form is being posted', async () => {
+  vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => undefined);
+  stubApi({ auth: 'github', setup: 'needed', user: null, app: null }, (path) =>
+    path === '/api/v1/setup/github/start'
+      ? respond({ action: 'https://github.com/settings/apps/new?state=s', manifest: '{}' })
+      : undefined,
+  );
+  renderGate();
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: 'Create the GitHub App' }));
+  const button = await screen.findByRole('button', { name: 'Opening GitHub…' });
+  await waitFor(() => expect(button.hasAttribute('disabled')).toBe(true));
+});
+
+it('renders no link for an install address that is not a web address', async () => {
+  stubApi({
+    auth: 'github',
+    setup: 'needs_owner',
+    user: null,
+    app: { ...app, installUrl: 'javascript:alert(1)' },
+  });
+  renderGate();
+  await screen.findByRole('heading', { name: 'Install and sign in' });
+  expect(screen.queryByRole('link', { name: 'Install the App on GitHub' })).toBeNull();
 });

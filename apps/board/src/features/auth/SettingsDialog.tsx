@@ -8,6 +8,7 @@ import {
 import type { Member, User } from '@atlas/contracts';
 import { Dialog } from '../../components/ui/dialog';
 import { NoContent, errorMessage, request } from '../../lib/api';
+import { isWebUrl } from '../../lib/auth';
 
 const membersKey = ['members'] as const;
 
@@ -35,12 +36,16 @@ function Connection() {
             <dd>{connection.data.connection.account}</dd>
           </dl>
           <p className="settings-links">
-            <a href={connection.data.connection.manageUrl} target="_blank" rel="noreferrer">
-              Manage the App on GitHub
-            </a>
-            <a href={connection.data.connection.installUrl} target="_blank" rel="noreferrer">
-              Choose repositories
-            </a>
+            {isWebUrl(connection.data.connection.manageUrl) && (
+              <a href={connection.data.connection.manageUrl} target="_blank" rel="noreferrer">
+                Manage the App on GitHub
+              </a>
+            )}
+            {isWebUrl(connection.data.connection.installUrl) && (
+              <a href={connection.data.connection.installUrl} target="_blank" rel="noreferrer">
+                Choose repositories
+              </a>
+            )}
           </p>
         </>
       )}
