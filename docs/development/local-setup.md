@@ -199,7 +199,7 @@ setup page. Sessions do not depend on the App file, so signed-in people stay sig
 members stay bound to their account numbers. Atlas has no way to change the owner; starting with
 no users means deleting the database, which also deletes projects and tasks.
 
-### Known limits
+### Known limits of sign-in and setup
 
 - The check that keeps the App file out of a Worker's workspace root compares paths as the API
   sees them. A Worker in a Docker container reports container paths, so the check cannot see the
@@ -242,7 +242,8 @@ answer 409 `github_unavailable` and the Board does not offer the clone choice.
 - The Board lists the repositories the App can access, and a link to GitHub's page for changing
   that selection. A repository that is not in the list was not selected for the App; choose it on
   GitHub.
-- A link shows "not accessible" when the App no longer covers the repository, because the owner
+- The Board warns "The GitHub App can no longer reach this repository" when the App no longer
+  covers the repository (the API reports `accessible: false`), because the owner
   removed it from the App's selection or replaced the App, or when GitHub cannot be reached at
   that moment. Choose the repository for the App again on GitHub, or unlink. The link keeps the
   name and default branch it had when it was made.
@@ -262,11 +263,14 @@ answer 409 `github_unavailable` and the Board does not offer the clone choice.
 3. The project shows "Cloning your repository" until the Worker finishes. Large repositories take
    minutes.
 
-What the Worker does: creates the folder, journals it, asks the API for a credential, reads the
-repository's default branch with `git ls-remote`, fetches every branch with `git fetch`, then adds
-`origin` (an address without any credential), checks out the default branch and writes the journal
-stage `cloned`. It fetches no submodules and no LFS content, and runs no hooks. The command is
-`succeeded` only after every step succeeded.
+What the Worker does: creates the folder and journals it, runs `git init` in it, asks the API for
+a credential, reads the repository's default branch with `git ls-remote`, fetches every branch
+with `git fetch`, then adds `origin` (an address without any credential), checks out the default
+branch and writes the journal stage `cloned`. It fetches no submodules and no LFS content, and
+runs no hooks. The command is `succeeded` only after every step succeeded. An empty repository
+succeeds with nothing checked out. If the repository has branches but the Worker cannot tell the
+default one after the fetch, the clone fails with `default_branch_unknown` and the folder stays;
+a token the Worker cannot use fails with `invalid_credential`.
 
 - Two Git processes hold the token, one after the other, not one. Git 2.39 in the Worker image
   cannot report the remote's default branch from a fetch, so `ls-remote` reads it first. Both are
@@ -283,8 +287,9 @@ stage `cloned`. It fetches no submodules and no LFS content, and runs no hooks. 
   (`clone_timeout`); each local step after 10 minutes; the Worker waits 30 seconds for the API's
   credential reply. Creating a task's worktree has a 30-second limit of its own; check it with a
   large repository (see `docs/development/acceptance.md`).
-- If the command fails or is refused, the folder stays, as with a new local repository, and the
-  project is `failed`. Atlas has no retry, cancel or delete for a project. Create a new project
+- If the command fails or is refused after the folder was created, the folder stays, as with a new
+  local repository, and the project is `failed`. A clone refused before that (`invalid_target`,
+  `invalid_repository`) creates no folder, and a folder that already existed is left untouched. Atlas has no retry, cancel or delete for a project. Create a new project
   with another folder name, or look at the folder, remove it on the Worker's disk and reuse its
   name. If the Worker stops while a clone runs, the Git process is ended and the project ends
   `needs_attention`: inspect the folder before you use the name again.
@@ -309,11 +314,13 @@ stage `cloned`. It fetches no submodules and no LFS content, and runs no hooks. 
 - Refusals and when they happen: `unknown_command`, `wrong_connection` (another Worker's command,
   or another connection), `command_finished`, `wrong_kind` (not a clone), `already_granted` (a
   token was given or is being requested, or three attempts were used), `grant_window_closed`,
-  `github_unavailable` (sign-in is off, the App file is unreadable, or GitHub failed or took
-  longer than 20 seconds), `app_file_exposed` (the App file lies in a Worker's workspace) and
-  `repository_not_accessible` (no link, or the App no longer covers the repository). A refusal
-  fails the clone with that code and message. If the repository was renamed, the clone fails with
-  `repository_renamed`: link the project again.
+  `github_unavailable` (sign-in is off, the App file is unreadable, GitHub failed or took longer
+  than 20 seconds, or the API is stopping), `app_file_exposed` (the App file lies in a Worker's
+  workspace) and `repository_not_accessible` (no link, or the App no longer covers the
+  repository). A refusal fails the clone with that code and message. If the repository was
+  renamed, the clone fails with `repository_renamed`. The project is then `failed` and cannot be
+  linked again (only a ready project can), so create a new project for the repository's new name,
+  with another folder name or after removing the left-over folder.
 - The API logs one line for every grant and refusal: the command, the Worker, the repository and
   the rights (`contents:read`). It never logs the token.
 - The token is held in memory by the API and the Worker. It never reaches the database, the
@@ -339,15 +346,25 @@ stage `cloned`. It fetches no submodules and no LFS content, and runs no hooks. 
 - New Worker messages: `credential.request`, `credential.grant` and `credential.refusal`. See
   `docs/development/protocol.md`.
 
-### Known limits
+### Known limits of linking and cloning
 
+- A cloned repository brings its own agent instructions and settings, and agents run with their
+  permission prompts off. Agents can also read other projects' checkouts on the same Worker. A
+  hostile repository could therefore steer an agent to read another project. Nothing leaves the
+  machine through Atlas until pushing exists, which has to settle this; until then clone only
+  repositories you trust.
+- The workspace is normally on a case-insensitive Windows drive, a setting several past Git clone
+  flaws needed. The image's Git (2.39.5 when checked) carries the fixes for the known ones, see
+  `docker/worker/README.md`; rebuilding the image picks up later Debian fixes. Check the
+  version again when you rebuild.
 - The check that keeps the App file out of a Worker's workspace root compares paths as the API sees
   them, and only for Workers already registered in its database. A Docker Worker reports container
   paths and so cannot be checked against its host mounts. Keep the App file out of the folder
   `pnpm dev` mounts yourself.
 - A second clone queued behind a clone that runs longer than 15 minutes is refused with
   `grant_window_closed`: the window counts from the send, and the Worker runs commands one at a
-  time. Create it again after the first finishes.
+  time. The refused clone's folder remains on the Worker, so create the project again after the
+  first clone finishes, with another folder name or after removing that folder.
 - A clone that stays pending blocks unlinking its project, and there is no way to cancel it.
 - With sign-in off, a create request that carries `githubRepositoryId` currently ignores the field
   and initializes an empty repository. This is the current behaviour and it is under review; the

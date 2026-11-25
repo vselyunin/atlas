@@ -765,7 +765,8 @@ list and an approved section disagree, the built behaviour is the one listed her
   (`GIT_CONFIG_NOSYSTEM`), so a system `http.proxy` or `sslCAInfo` is not used for a
   clone. System configuration could weaken TLS, add headers or add a credential helper.
 - The setup mark cookie lapses after 30 days. The approved text said it does not
-  expire by time; it still ends on the server when an owner exists.
+  expire by time; it still ends on the server when an owner exists. A cookie with no
+  lifetime would be dropped when the browser closes, losing the mark mid-setup.
 - The one-time owner code is entered on the setup page ("Use owner code"), not on the
   sign-in page, because the setup page is what the Board shows before an owner exists.
   The code is created only at API start.
@@ -793,7 +794,9 @@ list and an approved section disagree, the built behaviour is the one listed her
   existing projects "are not affected".
 - `GET /github/connection` is not registered while sign-in is off (404), whereas
   `GET /github/repositories` and the link routes exist and answer 409
-  `github_unavailable`. The approved text gave no status.
+  `github_unavailable`. The approved text gave no status. The Board never calls the
+  connection route with sign-in off, while the other routes were given a clear answer
+  because the Board's project views can reach them.
 - With sign-in off, a create that carries `githubRepositoryId` ignores the field and
   initializes an empty repository. The plan said 409 `github_unavailable`; changing it
   needs permission to change an existing test. This is the current behaviour and it is
@@ -809,3 +812,8 @@ list and an approved section disagree, the built behaviour is the one listed her
   runs commands one at a time.
 - Creating a task's worktree still has its 30-second limit. The check against a real
   repository on the Windows drive is in the acceptance checks and has not been run.
+- Clone outcomes the approved text did not describe: an empty repository succeeds with
+  nothing checked out; a repository with branches whose default branch cannot be
+  determined after the fetch fails `default_branch_unknown`; a token with characters
+  Git cannot carry fails `invalid_credential`. Each failure leaves the folder, like
+  any other failed clone.

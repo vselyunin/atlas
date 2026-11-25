@@ -51,10 +51,13 @@ What the image needs for `repository.clone`:
   container if it is set. `http` is accepted only for a loopback address. The image contains no
   token and no GitHub address of its own.
 
-The Worker runs these Git processes itself, outside the agent sandbox, with a clean environment:
-no `ATLAS_*` variables, no user Git configuration and, for the two that hold the token, no system
-configuration either, so the image's `safe.directory` entry and any system `http.proxy` or
-`sslCAInfo` are not used for them. The agent sandbox cannot read the Worker's environment (an agent
+The Worker runs these Git processes itself, outside the agent sandbox, with a cleaned
+environment: every `ATLAS_*` and `GIT_*` variable is removed (except `GIT_CEILING_DIRECTORIES`,
+which the Worker sets), and the user Git configuration is ignored. The two processes that hold the
+token then get one added variable, `ATLAS_GIT_TOKEN`, which the credential helper reads, and also
+ignore the system configuration, so the image's `safe.directory` entry and any system `http.proxy` or
+`sslCAInfo` are not used for them. Other inherited variables stay, for example `HTTPS_PROXY` or
+`SSL_CERT_FILE`, so a proxy or CA bundle set in the container's environment still applies. The agent sandbox cannot read the Worker's environment (an agent
 sees only its own processes) or the Worker state directory, and it does not allow GitHub's hosts
 unless `ATLAS_AGENT_ALLOWED_DOMAINS` lists them; do not add them.
 

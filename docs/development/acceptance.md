@@ -150,11 +150,13 @@ the App file's content.
    repository. Expected: GitHub returns to the Board.
 2. Create a project with "New local repository", wait until it is ready, select it and open
    Settings. In the repository section choose the test repository and "Link". Expected: the
-   repository's name and default branch show, with no "not accessible" message.
+   repository's name and default branch show, with no "The GitHub App can no longer reach this repository" warning.
 3. Reload. Expected: the link is still there. Choose "Unlink". Expected: the link is gone. Link
    again.
-4. On GitHub, remove the repository from the App's selection and reload the Board. Expected: the
-   link shows "not accessible". Select the repository again. Expected: the message goes.
+4. First add a second repository to the App's selection on GitHub: GitHub may refuse to remove
+   the only selected one. Then remove the test repository from the selection and reload the Board.
+   Expected: the Board warns "The GitHub App can no longer reach this repository". Select the
+   repository again. Expected: the warning goes.
 5. Create a project with "Clone from GitHub", the test repository, the online Worker and a new
    folder name. Expected: "Cloning your repository" shows, then the project becomes ready with a
    task board. In WSL, in the new folder: `git log --oneline` shows the repository's history,
@@ -173,13 +175,16 @@ the App file's content.
    chose. Atlas asks for each clone a token that is limited to one repository and to Contents
    read; GitHub does not show these tokens, so this part is covered by the stand-in tests, and
    the API log line (`Granted a repository credential`) shows the rights `contents:read`.
-10. Sign in with a second GitHub account that is not the owner and not a member, in another
-    browser. Expected: refused, as in the sign-in checks. As the owner, add it as a member, sign
+10. This needs a second GitHub account that can sign in, which works only with an
+    organization-owned App (see the sign-in checks); with a personal App, skip this step. Sign in
+    with that account, which is not the owner and not a member, in another browser. Expected:
+    refused, as in the sign-in checks. As the owner, add it as a member, sign
     in with it and clone a repository. Expected: the clone works, because every signed-in person
     can clone every repository the App can access. Remove the member again.
 11. Stop the Worker container (`docker stop atlas-worker`) while a clone of a large repository
-    runs. Expected: the project ends "needs attention" and its folder stays; start `pnpm dev`
-    again and check the folder before you reuse its name.
+    runs. Expected: `pnpm dev` notices the container stopped and stops the whole stack. Start
+    `pnpm dev` again: the project then shows "Repository needs attention" and its folder stays.
+    Check the folder before you reuse its name.
 12. Time limit for task worktrees: with a real, large repository cloned onto the workspace (on a
     Windows drive, as in this checkout), create a task, move it to Working and start a session.
     Expected: the worktree is created and the session starts. If the Board reports that creating
