@@ -15,7 +15,9 @@ export type User = z.infer<typeof UserSchema>;
 
 export const AuthStateResponseSchema = z.strictObject({
   auth: z.enum(['off', 'github']),
-  setup: z.enum(['not_needed', 'needed', 'needs_owner', 'done']),
+  // `reconnect`: an owner exists, the App file is missing, and this browser may not run setup
+  // yet. The owner code printed by the API at start opens setup for it.
+  setup: z.enum(['not_needed', 'needed', 'needs_owner', 'reconnect', 'done']),
   user: UserSchema.nullable(),
   app: z
     .strictObject({
