@@ -1,6 +1,6 @@
 import { API_BASE_PATH } from '@atlas/contracts';
 import type { AuthStateResponse } from '@atlas/contracts';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { ResolvedAuthOptions } from '../config.js';
 import type { ApiContext } from '../db/client.js';
 import type { AppFile } from '../github/app-file.js';
@@ -23,6 +23,8 @@ export function registerAuthRoutes(
   sessions: SessionStore,
   auth: ResolvedAuthOptions | undefined,
   appFile: AppFile | undefined,
+  // Reports `reconnect` instead of `needed` to a browser that may not run setup yet.
+  mayRunSetup: (request: FastifyRequest) => boolean = () => true,
 ) {
   // Tells the Board which page to show.
   app.get(
@@ -31,8 +33,17 @@ export function registerAuthRoutes(
     (request): AuthStateResponse => {
       if (!auth || !appFile) return { auth: 'off', setup: 'not_needed', user: null, app: null };
       const secrets = appFile.read();
-      const setup = !secrets ? 'needed' : hasOwner(context) ? 'done' : 'needs_owner';
+      const owner = hasOwner(context);
       const user = readSessionUser(request, sessions);
+      // With an owner and no App file, setup is open to the owner's session and to a browser
+      // that entered the owner code; everyone else is told how to reconnect.
+      const setup = secrets
+        ? owner
+          ? 'done'
+          : 'needs_owner'
+        : !owner || user?.role === 'owner' || mayRunSetup(request)
+          ? 'needed'
+          : 'reconnect';
       // The setup page needs the App until an owner exists; after that only signed-in users see it.
       const app =
         secrets && (setup === 'needs_owner' || user)

@@ -28,13 +28,23 @@ const authSchema = z.object({
   githubWebUrl: z.url().optional(),
 });
 
+// What an owner code opens: `owner` makes a browser's sign-in the first owner; `reconnect` lets a
+// browser create a new GitHub App when an owner exists and the App file is missing.
+export type OwnerCodePurpose = 'owner' | 'reconnect';
+
 // Sign-in with GitHub. Absent means sign-in is off and the API behaves as before sign-in existed.
 export interface AuthOptions {
   appFile: string;
   githubApiUrl?: string;
   githubWebUrl?: string;
-  ownerCodeSink?: (code: string) => void;
+  ownerCodeSink?: (code: string, purpose: OwnerCodePurpose) => void;
 }
+
+const OWNER_CODE_HINTS: Record<OwnerCodePurpose, string> = {
+  owner: 'enter it on the setup page to become the owner',
+  reconnect:
+    'the GitHub connection is missing; enter it on the setup page to connect a new GitHub App',
+};
 
 export interface ApiOptions extends z.infer<typeof optionsSchema> {
   now?: () => Date;
@@ -60,10 +70,8 @@ function resolveAuth(auth: AuthOptions | undefined): ResolvedAuthOptions | undef
     // The person running the API reads the code from its output; it never goes through the log.
     ownerCodeSink:
       auth.ownerCodeSink ??
-      ((code) =>
-        process.stdout.write(
-          `Atlas owner code (enter it on the setup page to become the owner): ${code}\n`,
-        )),
+      ((code, purpose) =>
+        process.stdout.write(`Atlas owner code (${OWNER_CODE_HINTS[purpose]}): ${code}\n`)),
   };
 }
 

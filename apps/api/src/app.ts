@@ -23,7 +23,7 @@ import { registerOperationRoutes } from './operations/routes.js';
 import { registerProjectRoutes } from './projects/routes.js';
 import { SessionHub } from './sessions/hub.js';
 import { registerSessionRoutes } from './sessions/routes.js';
-import { registerSetupRoutes } from './setup/routes.js';
+import { reconnectAccess, registerSetupRoutes } from './setup/routes.js';
 import { SetupService, assertAppFileOutsideWorkspaces } from './setup/service.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerVersionRoutes } from './versions/routes.js';
@@ -115,8 +115,9 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     });
     // Removing a member closes their open Board session sockets at once.
     authSessions.onUserRemoved((userId) => sessions.closeForUser(userId));
-    registerAccess(app, context, authSessions, appFile);
-    registerAuthRoutes(app, context, authSessions, auth, appFile);
+    const reconnect = setup ? reconnectAccess(setup) : undefined;
+    registerAccess(app, context, authSessions, appFile, reconnect);
+    registerAuthRoutes(app, context, authSessions, auth, appFile, reconnect);
     if (setup && appFile && github && auth) {
       registerSetupRoutes(app, setup, allowedOrigin);
       registerGithubRoutes(
@@ -163,7 +164,7 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     await app.ready();
     // Shown to the person running the API, never through the request log.
     const ownerCode = setup?.openOwnerCode();
-    if (ownerCode && auth) auth.ownerCodeSink(ownerCode);
+    if (ownerCode && auth) auth.ownerCodeSink(ownerCode.code, ownerCode.purpose);
     return app;
   } catch (error) {
     await app.close();

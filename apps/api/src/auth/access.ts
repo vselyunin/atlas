@@ -10,7 +10,8 @@ import type { SessionStore } from './sessions.js';
 
 // Who may call a route while sign-in is on. A route without `access` requires a session.
 // - public: anyone; the route reads the session itself if it needs one.
-// - setup: anyone while the database has no owner, then only the owner.
+// - setup: anyone while the database has no owner, then the owner, or, while the App file is
+//   missing, a browser that entered the owner code printed at start (a reconnect).
 // - worker: anyone; the Worker socket keeps its own token check.
 // - owner: the owner's session.
 export type RouteAccess = 'public' | 'setup' | 'worker' | 'owner';
@@ -70,6 +71,9 @@ export function registerAccess(
   context: ApiContext,
   sessions: SessionStore,
   appFile: AppFile | undefined,
+  // Lets a request reach a `setup` route without the owner's session while an owner exists:
+  // the owner code's reconnect path, used when the App file is missing.
+  reconnect: (request: FastifyRequest) => boolean = () => false,
 ) {
   app.decorateRequest('user', null);
   if (!appFile) return;
@@ -78,8 +82,11 @@ export function registerAccess(
     if (access === 'public' || access === 'worker') return done();
     try {
       request.user = readSessionUser(request, sessions);
-      if (access === 'setup')
-        return done(hasOwner(context) ? requireOwner(request.user) : undefined);
+      if (access === 'setup') {
+        if (!hasOwner(context) || request.user?.role === 'owner' || reconnect(request))
+          return done();
+        return done(requireOwner(request.user));
+      }
       if (!appFileExists(appFile))
         return done(new ApiError(409, 'setup_required', 'Atlas is not set up yet'));
       if (!request.user) return done(new ApiError(401, 'sign_in_required', 'Sign in to continue'));

@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { SetupStartResponse } from '@atlas/contracts';
 import { eq, inArray, isNotNull } from 'drizzle-orm';
 import { hasOwner } from '../auth/access.js';
+import type { OwnerCodePurpose } from '../config.js';
 import type { ApiContext, Database, DbTransaction } from '../db/client.js';
 import { installation, workers } from '../db/schema.js';
 import type { AppFile, AppSecrets } from '../github/app-file.js';
@@ -28,6 +29,8 @@ const STATE_LIFETIME_MS = 60 * 60 * 1000;
 const MAX_PENDING_STATES = 50;
 const MARK_KEY = 'setup_mark';
 const OWNER_CODE_KEY = 'owner_code';
+// Lets a browser run setup again when an owner exists and the App file is missing.
+const RECONNECT_KEY = 'reconnect_mark';
 
 const newSecret = () => randomBytes(32).toString('base64url');
 const digest = (value: string) => createHash('sha256').update(value).digest();
@@ -68,8 +71,9 @@ export function assertAppFileOutsideWorkspaces(context: ApiContext, appFile: App
 }
 
 // First-run setup: creates the GitHub App through the manifest flow, stores its secrets in the
-// App file, and decides which browser may become the owner. `state` values live in memory only;
-// the setup mark and the owner code are stored as SHA-256 hashes.
+// App file, and decides which browser may become the owner. It also lets the owner connect a new
+// App after the App file was removed. `state` values live in memory only; the marks and the
+// owner code are stored as SHA-256 hashes.
 export class SetupService {
   // Pending setups by the SHA-256 of their `state`, with the hash of the browser's cookie.
   private readonly pending = new Map<string, { issuedAt: number; cookieHash: Buffer }>();
@@ -138,7 +142,7 @@ export class SetupService {
       try {
         const secrets = await this.verifiedApp(params.code);
         // The mark is stored before the file is written, so a written App file always comes with
-        // a mark. An existing owner needs none: they are signed in already.
+        // a mark. An existing owner needs none: they sign in with their own GitHub account.
         mark = hasOwner(this.options.context) ? undefined : this.issueMark();
         try {
           this.options.appFile.write(secrets);
@@ -146,6 +150,8 @@ export class SetupService {
           if (mark !== undefined) this.dropMark();
           throw error;
         }
+        // A reconnect is done: its code and mark open nothing once the App file exists.
+        if (mark === undefined) this.dropReconnect();
       } finally {
         this.finishing = false;
       }
@@ -168,15 +174,38 @@ export class SetupService {
     }
   }
 
-  // Returns a new setup mark for a correct, unused owner code; null otherwise.
-  redeemOwnerCode(code: string): string | null {
+  private dropReconnect() {
+    try {
+      this.options.context.db
+        .delete(installation)
+        .where(inArray(installation.key, [OWNER_CODE_KEY, RECONNECT_KEY]))
+        .run();
+    } catch {
+      // Harmless: both open nothing while the App file exists, and the next start removes them.
+    }
+  }
+
+  // An owner exists and the App file is missing: the owner code then opens setup again.
+  reconnecting(): boolean {
+    return hasOwner(this.options.context) && this.options.appFile.read() === null;
+  }
+
+  // Trades a correct, unused owner code for a new mark; null otherwise. Before an owner exists
+  // the mark is the setup mark, which lets this browser's sign-in become the owner. While
+  // reconnecting it is the reconnect mark, which only opens the setup routes; it never makes
+  // anyone the owner.
+  redeemOwnerCode(code: string): { mark: string; purpose: OwnerCodePurpose } | null {
     const stored = this.storedHash(OWNER_CODE_KEY);
     if (!stored || !matches(stored, code)) return null;
+    const owner = hasOwner(this.options.context);
+    // A code issued for a reconnect opens nothing once the App file is back.
+    if (owner && !this.reconnecting()) return null;
+    const purpose: OwnerCodePurpose = owner ? 'reconnect' : 'owner';
     return this.options.context.db.transaction((tx) => {
       tx.delete(installation).where(eq(installation.key, OWNER_CODE_KEY)).run();
       const mark = newSecret();
-      this.storeHash(tx, MARK_KEY, mark);
-      return mark;
+      this.storeHash(tx, purpose === 'owner' ? MARK_KEY : RECONNECT_KEY, mark);
+      return { mark, purpose };
     });
   }
 
@@ -186,24 +215,40 @@ export class SetupService {
     return stored !== null && matches(stored, rawMark);
   }
 
-  // Called when an owner is created: the mark and the owner code stop working.
+  // Whether this browser's reconnect mark lets it run setup now.
+  hasReconnectMark(rawMark: string | undefined): boolean {
+    if (!rawMark || !this.reconnecting()) return false;
+    const stored = this.storedHash(RECONNECT_KEY);
+    return stored !== null && matches(stored, rawMark);
+  }
+
+  // Whether an owner code for a reconnect is waiting to be entered.
+  awaitsReconnectCode(): boolean {
+    return this.reconnecting() && this.storedHash(OWNER_CODE_KEY) !== null;
+  }
+
+  // Called when an owner is created: the marks and the owner code stop working.
   clearOwnerSecrets(): void {
     this.options.context.db
       .delete(installation)
-      .where(inArray(installation.key, [MARK_KEY, OWNER_CODE_KEY]))
+      .where(inArray(installation.key, [MARK_KEY, OWNER_CODE_KEY, RECONNECT_KEY]))
       .run();
   }
 
-  // At start: a new owner code while the App file exists and no owner does. Returns the code to
-  // show the person running the API, or null. Stale secrets are removed otherwise.
-  openOwnerCode(): string | null {
-    if (hasOwner(this.options.context) || this.options.appFile.read() === null) {
+  // At start: a new owner code while the App file exists and no owner does, or while an owner
+  // exists and the App file is missing (a reconnect). Returns the code to show the person running
+  // the API, or null. Stale secrets are removed otherwise. A reconnect mark already given to a
+  // browser keeps working across a restart until the App file is written.
+  openOwnerCode(): { code: string; purpose: OwnerCodePurpose } | null {
+    const owner = hasOwner(this.options.context);
+    const appFile = this.options.appFile.read() !== null;
+    if (owner === appFile) {
       this.clearOwnerSecrets();
       return null;
     }
     const code = newSecret();
     this.storeHash(this.options.context.db, OWNER_CODE_KEY, code);
-    return code;
+    return { code, purpose: owner ? 'reconnect' : 'owner' };
   }
 
   private take(state: string) {
