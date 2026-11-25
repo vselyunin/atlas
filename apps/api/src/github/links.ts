@@ -1,6 +1,6 @@
 import type { GithubLink } from '@atlas/contracts';
 import { eq } from 'drizzle-orm';
-import type { ApiContext } from '../db/client.js';
+import type { ApiContext, DbTransaction } from '../db/client.js';
 import { githubLinks } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { getProject } from '../projects/service.js';
@@ -9,6 +9,21 @@ import { GitHubError } from './client.js';
 import type { GitHubClient } from './client.js';
 
 export type StoredLink = { repositoryId: number; fullName: string; defaultBranch: string };
+
+// What was stored at link time, with no call to GitHub. Usable with sign-in off, where there is
+// no LinkService, so that a clone dispatched earlier can still be sent again.
+export function storedLink(
+  db: ApiContext['db'] | DbTransaction,
+  projectId: string,
+): StoredLink | null {
+  const row = db.select().from(githubLinks).where(eq(githubLinks.projectId, projectId)).get();
+  if (!row) return null;
+  return {
+    repositoryId: row.repositoryId,
+    fullName: row.fullName,
+    defaultBranch: row.defaultBranch,
+  };
+}
 
 // The repository a project is linked to. Only the repository ID, its name and default branch at
 // link time are stored; GitHub is asked each time whether the App still covers the repository.
@@ -99,13 +114,7 @@ export class LinkService {
 
   // What was stored at link time, with no call to GitHub.
   stored(projectId: string): StoredLink | null {
-    const row = this.row(projectId);
-    if (!row) return null;
-    return {
-      repositoryId: row.repositoryId,
-      fullName: row.fullName,
-      defaultBranch: row.defaultBranch,
-    };
+    return storedLink(this.context.db, projectId);
   }
 
   private row(projectId: string) {

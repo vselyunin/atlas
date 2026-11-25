@@ -196,11 +196,29 @@ The API grants a credential only for a clone it dispatched to that Worker, for t
 
 The Worker registers `repository.clone` and sends one `credential.request` per clone after it has created and journaled the target folder. A refusal fails the clone with its code and message. A grant whose `repository` differs from the command's fails it with `repository_renamed` before Git contacts the host. When no reply arrives within 30,000 ms, the connection drops or the Worker stops, the clone ends as `needs_attention`. Replies for a command ID with no pending request are ignored. A clone journaled without reaching the `cloned` stage recovers as `needs_attention` (`recovery_uncertain`). A clone still queued when the Worker stops is not started and gets no result, so the API dispatches it again.
 
+The API answers a request it does not grant with a `credential.refusal` whose `code` is one of these, never with a `protocol.error`. The checks that need no GitHub call come first; GitHub is asked last.
+
+| Code                        | When                                                                                                  |
+| --------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `unknown_command`           | No command has this ID                                                                                |
+| `wrong_connection`          | The command belongs to another Worker, or was not last dispatched on this connection                  |
+| `command_finished`          | The command already has a result                                                                      |
+| `wrong_kind`                | The command is not a clone                                                                            |
+| `already_granted`           | A credential was already given, or is being asked for, for this dispatch                              |
+| `grant_window_closed`       | More than 900,000 ms have passed since the latest dispatch                                            |
+| `github_unavailable`        | Sign-in is off, the App file is missing or unreadable, or GitHub failed or did not answer within 20 s |
+| `app_file_exposed`          | The App file lies inside a registered Worker's workspace root                                         |
+| `repository_not_accessible` | The project has no link, or the App no longer covers the linked repository                            |
+
+A refusal for another Worker's command names nothing about it. The API asks GitHub for the repository's current name and then for an installation token limited to the linked repository ID with `contents: read`, and gives GitHub at most 20 seconds in all so that the refusal reaches the Worker within its 30-second wait; a token GitHub hands out after that is revoked at once. The window counts from the latest dispatch: a clone sent again after a reconnect can be granted again on the new connection. A token given for an earlier dispatch is not revoked by the re-dispatch, because a Worker that reconnected may still be fetching with it. The API revokes every token it handed out for a command when the command's result arrives, when the grant window closes, and when the API stops (best-effort, each revocation bounded by the 10-second GitHub timeout). The broker's state is in memory only, so an API restart forgets it; a token not revoked then expires within an hour. The API logs one line per grant and per refusal naming the command, the Worker, the repository and the rights (`contents:read`), never the token.
+
 Two Git processes hold the token, one after the other: `git ls-remote --symref` reads the default branch, because Git 2.39 in the Worker image cannot record it during a fetch, and `git fetch` downloads the branches. Both read the token from one environment variable through the Worker's credential helper. Both run with the same locked-down settings: no system or user Git configuration, no other credential helper, TLS verification on, no extra headers, no redirects, HTTPS only, no submodules, no hooks and no background maintenance. Setting `origin` and checking out run in Git processes that never hold the token.
 
 ### Project creation
 
 The `local` repository form of `POST /projects` accepts an optional `githubRepositoryId` (positive integer). The `existing` form rejects it. Stored projects and `Repository` responses do not carry it. Older strict validators reject the field, so deploy the updated API before a Board that sends it.
+
+With sign-in on, a create with `githubRepositoryId` clones that repository. The API answers 503 `worker_unavailable` unless the Worker is online and registered `repository.clone`, then confirms with GitHub that the App can access the repository before writing anything: 403 `repository_not_accessible` when it cannot, 502 `github_unavailable` when GitHub fails, 409 `setup_required` without an App file. On success it answers 202 and writes the `local` project, its operation and the project's link (read it at `GET /projects/:projectId/github-link`) in one transaction, then dispatches the clone command with the repository's `owner/name` as stored in the link. The operation and project responses keep their shape. With sign-in off the field is ignored and the project is initialized as a new local repository, as before cloning existed.
 
 ## Agent sessions
 

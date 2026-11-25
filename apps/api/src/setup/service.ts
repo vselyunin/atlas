@@ -43,20 +43,27 @@ class Refused extends Error {
   }
 }
 
-// Refuses to run with the App file inside a registered Worker's workspace root: agents there
-// could read the App's private key.
-export function assertAppFileOutsideWorkspaces({ db }: ApiContext, appFile: AppFile) {
+// The ID of a registered Worker whose workspace root holds the App file, or null. Agents in that
+// workspace could read the App's private key.
+export function workerExposingAppFile({ db }: ApiContext, appFile: AppFile): string | null {
   const roots = db
     .select({ id: workers.id, workspaceRoot: workers.workspaceRoot })
     .from(workers)
     .where(isNotNull(workers.workspaceRoot))
     .all();
   for (const { id, workspaceRoot } of roots) {
-    if (workspaceRoot && appFile.isUnder(workspaceRoot)) {
-      throw new Error(
-        `GitHub App file lies inside the workspace root of Worker ${id}: ${appFile.path}`,
-      );
-    }
+    if (workspaceRoot && appFile.isUnder(workspaceRoot)) return id;
+  }
+  return null;
+}
+
+// Refuses to run with the App file inside a registered Worker's workspace root.
+export function assertAppFileOutsideWorkspaces(context: ApiContext, appFile: AppFile) {
+  const id = workerExposingAppFile(context, appFile);
+  if (id !== null) {
+    throw new Error(
+      `GitHub App file lies inside the workspace root of Worker ${id}: ${appFile.path}`,
+    );
   }
 }
 

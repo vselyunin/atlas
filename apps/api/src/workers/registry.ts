@@ -71,6 +71,11 @@ export class WorkerRegistry {
     return this.connections.get(workerId)?.socket.readyState === WebSocket.OPEN;
   }
 
+  // The connection the Worker is registered on now; a credential is granted only on it.
+  socketOf(workerId: string): WebSocket | undefined {
+    return this.connections.get(workerId)?.socket;
+  }
+
   send(workerId: string, message: ApiToWorkerMessage): boolean {
     const socket = this.connections.get(workerId)?.socket;
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;

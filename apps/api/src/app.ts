@@ -14,6 +14,7 @@ import { isLocalHost, validateOptions } from './config.js';
 import { openDatabase } from './db/client.js';
 import { AppFile } from './github/app-file.js';
 import { GitHubClient } from './github/client.js';
+import { CredentialBroker } from './github/credentials.js';
 import { LinkService } from './github/links.js';
 import { registerGithubRoutes, registerGithubUnavailableRoutes } from './github/routes.js';
 import { ApiError, registerErrorHandlers } from './http/errors.js';
@@ -106,6 +107,12 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
       sessions.close();
       done();
     });
+    const projectGithub = appFile && github ? { appFile, client: github } : undefined;
+    const broker = new CredentialBroker({ context, log: app.log, github: projectGithub });
+    // Revokes held credentials, best-effort; each revocation is bounded by the GitHub timeout.
+    app.addHook('onClose', async () => {
+      await broker.close();
+    });
     // Removing a member closes their open Board session sockets at once.
     authSessions.onUserRemoved((userId) => sessions.closeForUser(userId));
     registerAccess(app, context, authSessions, appFile);
@@ -134,13 +141,13 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     } else {
       registerGithubUnavailableRoutes(app);
     }
-    registerProjectRoutes(app, context, registry);
+    registerProjectRoutes(app, context, registry, broker, projectGithub);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);
     registerTaskRoutes(app, context);
     registerOperationRoutes(app, context);
     registerSessionRoutes(app, sessions, allowedOrigin, appFile ? authSessions : undefined);
-    registerGateway(app, context, registry, workerToken, sessions);
+    registerGateway(app, context, registry, workerToken, sessions, broker);
     // Fastify owns the error handlers; round-trip every expected HTTP error via the shared shape.
     app.addHook('preSerialization', (request, reply, payload, done) => {
       if (reply.statusCode >= 400) {

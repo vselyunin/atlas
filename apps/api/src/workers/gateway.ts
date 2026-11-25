@@ -11,6 +11,7 @@ import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import type { RawData } from 'ws';
 import type { ApiContext } from '../db/client.js';
+import type { CredentialBroker } from '../github/credentials.js';
 import { ApiError } from '../http/errors.js';
 import { applyAcceptance, applyResult, dispatchPending } from '../operations/service.js';
 import type { SessionHub } from '../sessions/hub.js';
@@ -49,6 +50,7 @@ export function registerGateway(
   registry: WorkerRegistry,
   workerToken: string,
   sessions: SessionHub,
+  broker: CredentialBroker,
 ) {
   const authorization = Buffer.from(`Bearer ${workerToken}`);
   app.route({
@@ -87,6 +89,31 @@ export function registerGateway(
           ...(commandId ? { commandId } : {}),
         });
       };
+      // Answers with a grant or a refusal, never a protocol error. The grant's token is not
+      // logged and goes nowhere but this socket.
+      const answerCredential = (requested: string, requester: string) => {
+        broker.request(requested, requester, socket).then(
+          (payload) =>
+            send({
+              protocolVersion: PROTOCOL_VERSION,
+              messageId: randomUUID(),
+              type: 'credential.grant',
+              commandId: requested,
+              payload,
+            }),
+          (error: unknown) =>
+            send({
+              protocolVersion: PROTOCOL_VERSION,
+              messageId: randomUUID(),
+              type: 'credential.refusal',
+              commandId: requested,
+              payload:
+                error instanceof ApiError
+                  ? { code: error.code, message: error.message }
+                  : { code: 'github_unavailable', message: 'The credential could not be issued' },
+            }),
+        );
+      };
       const registrationDeadline = setTimeout(() => {
         reportError('registration_timeout', 'Worker registration deadline expired');
         socket.close(1008);
@@ -117,7 +144,7 @@ export function registerGateway(
               type: 'worker.registered',
               payload: { workerId, heartbeatIntervalMs: HEARTBEAT_INTERVAL_MS },
             });
-            dispatchPending(context, registry, workerId);
+            dispatchPending(context, registry, workerId, undefined, broker);
             return;
           }
           switch (message.type) {
@@ -150,6 +177,11 @@ export function registerGateway(
                 commandId,
                 payload: {},
               });
+              // The command is done: its credential is revoked and forgotten.
+              void broker.release(commandId);
+              break;
+            case 'credential.request':
+              answerCredential(message.commandId, workerId);
               break;
             case 'session.started':
               sessions.onStarted(workerId, message.payload);

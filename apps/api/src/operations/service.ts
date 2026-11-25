@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { PROTOCOL_VERSION, REPOSITORY_INIT_CAPABILITY } from '@atlas/contracts';
-import type { CommandResult, Operation } from '@atlas/contracts';
+import {
+  PROTOCOL_VERSION,
+  REPOSITORY_CLONE_CAPABILITY,
+  REPOSITORY_INIT_CAPABILITY,
+} from '@atlas/contracts';
+import type { CommandDispatch, CommandResult, Operation } from '@atlas/contracts';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import type { ApiContext, DbTransaction } from '../db/client.js';
 import { operations, projects, workers } from '../db/schema.js';
+import type { CredentialBroker } from '../github/credentials.js';
+import { storedLink } from '../github/links.js';
 import { ApiError } from '../http/errors.js';
 import { getProject } from '../projects/service.js';
 import { addVersion } from '../versions/service.js';
@@ -40,11 +46,31 @@ function requireAssignedOperation(tx: DbTransaction, workerId: string, commandId
   return operation;
 }
 
+// The command for an operation, by its kind, or null when it cannot be sent: a clone needs a Worker
+// that can clone and the project's link for the repository's name.
+function commandPayload(
+  db: ApiContext['db'],
+  operation: { kind: string; projectId: string },
+  relativePath: string,
+  capabilities: readonly string[],
+): CommandDispatch['payload'] | null {
+  const { projectId } = operation;
+  if (operation.kind === REPOSITORY_INIT_CAPABILITY) {
+    return { kind: REPOSITORY_INIT_CAPABILITY, projectId, relativePath };
+  }
+  if (operation.kind !== REPOSITORY_CLONE_CAPABILITY) return null;
+  if (!capabilities.includes(REPOSITORY_CLONE_CAPABILITY)) return null;
+  const link = storedLink(db, projectId);
+  if (!link) return null;
+  return { kind: REPOSITORY_CLONE_CAPABILITY, projectId, relativePath, repository: link.fullName };
+}
+
 export function dispatchPending(
   context: ApiContext,
   registry: WorkerRegistry,
   workerId: string,
   operationId?: string,
+  broker?: CredentialBroker,
 ): void {
   const { db, now } = context;
   const worker = db.select().from(workers).where(eq(workers.id, workerId)).get();
@@ -65,20 +91,24 @@ export function dispatchPending(
     const { projectId } = operation;
     const { repository } = getProject(db, projectId);
     if (repository.mode !== 'local') throw new Error('Expected a local project');
+    const payload = worker
+      ? commandPayload(db, operation, repository.relativePath, worker.capabilities)
+      : null;
     // A reconfigured Worker must not initialize an outstanding job at a different target.
     const dispatched =
+      payload !== null &&
       worker?.workspaceRoot === operation.workspaceRoot &&
       registry.send(workerId, {
         protocolVersion: PROTOCOL_VERSION,
         messageId: randomUUID(),
         type: 'command.dispatch',
         commandId: operation.id,
-        payload: {
-          kind: REPOSITORY_INIT_CAPABILITY,
-          projectId,
-          relativePath: repository.relativePath,
-        },
+        payload,
       });
+    if (dispatched && payload.kind === REPOSITORY_CLONE_CAPABILITY) {
+      const socket = registry.socketOf(workerId);
+      if (socket) broker?.noteDispatch(operation.id, socket);
+    }
     if (operation.connectionLost === dispatched) {
       db.update(operations)
         .set({ connectionLost: !dispatched, updatedAt: now() })
