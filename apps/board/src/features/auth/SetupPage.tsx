@@ -66,7 +66,8 @@ function StartStep({ outcome }: { outcome: AuthOutcome }) {
         </li>
         <li>
           For an organization&apos;s App, people who sign in must be members of that organization.
-          For a personal App, only you can sign in.
+          For a personal App, GitHub is expected to let only you sign in. Either way, Atlas lets in
+          only the owner and the members the owner adds.
         </li>
       </ul>
       {failure && (
@@ -115,7 +116,8 @@ function StartStep({ outcome }: { outcome: AuthOutcome }) {
   );
 }
 
-function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: AuthOutcome }) {
+// Sends the owner code the API printed at start. Afterwards the auth state is read again.
+function OwnerCodeForm({ accepted }: { accepted: string }) {
   const client = useQueryClient();
   const [code, setCode] = useState('');
   const redeem = useMutation({
@@ -131,6 +133,68 @@ function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: A
     },
   });
   return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (code.trim() && !redeem.isPending) redeem.mutate();
+      }}
+    >
+      <label>
+        Owner code
+        <input
+          value={code}
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(event) => setCode(event.target.value)}
+        />
+      </label>
+      {redeem.error && (
+        <p role="alert" className="error">
+          {errorMessage(redeem.error)}
+        </p>
+      )}
+      {redeem.isSuccess && (
+        <p role="status" className="success">
+          {accepted}
+        </p>
+      )}
+      <div className="form-actions">
+        <button className="button secondary" disabled={redeem.isPending || !code.trim()}>
+          {redeem.isPending ? 'Checking…' : 'Use owner code'}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// An owner exists but the App file is gone, and this browser holds neither the owner's session
+// nor the owner code: sign-in cannot work without an App, so only the code opens setup.
+function ReconnectStep({ outcome }: { outcome: AuthOutcome }) {
+  return (
+    <>
+      <h1>Reconnect Atlas to GitHub</h1>
+      <p>
+        Atlas has an owner, but its connection to GitHub was removed, so nobody can sign in until a
+        new GitHub App is created. The owner stays the same: after the new App is created, the owner
+        signs in with their GitHub account as before, and nobody else becomes the owner.
+      </p>
+      {outcome.setupFailure && (
+        <p role="alert" className="error">
+          {setupFailureMessage(outcome.setupFailure)}
+        </p>
+      )}
+      <h2>Enter the owner code</h2>
+      <p>
+        The API prints an owner code in its terminal output when it starts. Enter it here to create
+        the new App from this browser. The code works once; to get a new one, restart the API.
+      </p>
+      <OwnerCodeForm accepted="The owner code was accepted." />
+    </>
+  );
+}
+
+function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: AuthOutcome }) {
+  return (
     <>
       <h1>Install and sign in</h1>
       <p>
@@ -141,8 +205,8 @@ function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: A
         ) : (
           'The GitHub App was created.'
         )}{' '}
-        Install it on the repositories you want to use, then sign in. The first account to sign in
-        becomes the owner.
+        Install it on the repositories you want to use, then sign in. You become the owner if you
+        sign in from the browser that created the App, or from one where the owner code was entered.
       </p>
       {outcome.signInFailure && (
         <p role="alert" className="error">
@@ -165,37 +229,7 @@ function OwnerStep({ app, outcome }: { app: AuthStateResponse['app']; outcome: A
         the owner code. The API prints it in its terminal output when it starts. To get a new one,
         restart the API.
       </p>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (code.trim() && !redeem.isPending) redeem.mutate();
-        }}
-      >
-        <label>
-          Owner code
-          <input
-            value={code}
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => setCode(event.target.value)}
-          />
-        </label>
-        {redeem.error && (
-          <p role="alert" className="error">
-            {errorMessage(redeem.error)}
-          </p>
-        )}
-        {redeem.isSuccess && (
-          <p role="status" className="success">
-            The owner code was accepted. Now sign in with GitHub.
-          </p>
-        )}
-        <div className="form-actions">
-          <button className="button secondary" disabled={redeem.isPending || !code.trim()}>
-            {redeem.isPending ? 'Checking…' : 'Use owner code'}
-          </button>
-        </div>
-      </form>
+      <OwnerCodeForm accepted="The owner code was accepted. Now sign in with GitHub." />
     </>
   );
 }
@@ -205,7 +239,7 @@ export function SetupPage({
   app,
   outcome,
 }: {
-  step: 'needed' | 'needs_owner';
+  step: 'needed' | 'needs_owner' | 'reconnect';
   app: AuthStateResponse['app'];
   outcome: AuthOutcome;
 }) {
@@ -220,6 +254,8 @@ export function SetupPage({
         </div>
         {step === 'needed' ? (
           <StartStep outcome={outcome} />
+        ) : step === 'reconnect' ? (
+          <ReconnectStep outcome={outcome} />
         ) : (
           <OwnerStep app={app} outcome={outcome} />
         )}

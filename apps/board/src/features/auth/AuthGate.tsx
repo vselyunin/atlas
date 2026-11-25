@@ -47,7 +47,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </>
     );
   }
-  if (state.setup === 'needed' || state.setup === 'needs_owner') {
+  if (state.setup === 'needed' || state.setup === 'needs_owner' || state.setup === 'reconnect') {
     return <SetupPage step={state.setup} app={state.app} outcome={outcome} />;
   }
   if (!state.user) return <SignInPage outcome={outcome} />;
