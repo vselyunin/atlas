@@ -44,10 +44,16 @@ export function createProject(
       const project: Project = {
         id: randomUUID(),
         name: input.name,
+        // The GitHub repository ID is a create-only field; the stored shape omits it.
         repository:
           input.repository.mode === 'existing'
             ? input.repository
-            : { ...input.repository, localPath: null },
+            : {
+                mode: 'local',
+                workerId: input.repository.workerId,
+                relativePath: input.repository.relativePath,
+                localPath: null,
+              },
         state: 'ready',
         operationId: null,
         createdAt: now,

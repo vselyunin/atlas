@@ -131,7 +131,7 @@ A Worker registers with `["repository.init"]`, `["repository.init","agent.sessio
 Compatibility in both directions:
 
 - An older API refuses a newer Worker's registration, because its validator does not know the third list. Update the API before the Worker.
-- A newer API accepts an older Worker. It never sends a worker without `repository.clone` a clone command or a credential message.
+- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message.
 
 ### Clone and credentials
 
@@ -147,7 +147,7 @@ The Worker asks for a credential when it needs one, over the same connection.
 
 The API grants a credential only for a clone it dispatched to that Worker, for the repository in that command, and only within 900,000 ms (15 minutes) after dispatch. The Worker waits at most 30,000 ms for a reply. The token is short-lived, is held in memory and is never written to the database, the Worker journal, a Git configuration, a command line or a log.
 
-Until the Worker handles clones it answers a clone dispatch with a `protocol.error` carrying the command ID and does not register `repository.clone`.
+Until the Worker handles clones it answers a clone dispatch with a `protocol.error` with code `command_unsupported` carrying the command ID and does not register `repository.clone`.
 
 ### Project creation
 
