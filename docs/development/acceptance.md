@@ -55,17 +55,39 @@ The checks began on 2026-11-23, with `pnpm dev` and the login in the `atlas-agen
 | Session starts in the container and shows "Atlas: agent sandbox on…" | Passed, after a fix: Claude first exited with a read-only error creating `/tmp/claude`.  |
 | Folder-trust question appears and can be answered on the Board       | Passed.                                                                                  |
 | Permission-bypass warning appears on the Board                       | Passed. The user approved accepting it; the agent then started the task.                 |
-| Agent edits and commits in its worktree with `git add -A`            | Passed with a defect, fixed afterwards and not re-run with real Claude; see below.       |
+| Agent edits and commits in its worktree with `git add -A`            | Passed with a defect, fixed afterwards; passed in the re-check on 2026-11-25, see below. |
 | Agent cannot write `/tmp/outside.txt`                                | Passed: `Read-only file system`; the file exists neither in the container nor in WSL.    |
 | Stop ends the session                                                | Passed: the Board shows the session ended and no agent process is left in the container. |
 
 The commit check found a defect. Claude creates `.claude` in the worktree, the sandbox then
 adds the placeholders `.claude/agents` and `.claude/commands`, and `git add -A` committed both
 as empty files next to `NOTES.md`. Both paths were added to the agent's Git excludes file. The
-fix is covered by a Worker test; the real-Claude check was not repeated after it.
+fix is covered by a Worker test and was confirmed in the re-check below.
 
 The folder-trust question and the permission-bypass warning are asked again in every new
 session for the same worktree.
+
+### Re-check on 2026-11-25
+
+After the placeholder, Git link and object folder fixes, one session was run again with a real
+logged-in Claude on the merged code, with `pnpm dev` and a freshly built Worker image. The user
+answered the folder-trust question and the permission-bypass warning; the coordinating agent
+started and stopped the session on the Board and checked the results from WSL.
+
+| Check                                                             | Result                                                                                        |
+| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Session starts with the sandbox on                                | Passed.                                                                                       |
+| Agent commits with `git add -A`                                   | Passed: the commit holds only `RECHECK.md`, with no `.claude` placeholders.                   |
+| The commit is usable in the project folder while the session runs | Passed: the task branch shows the commit there and `git fsck --strict` reports nothing.       |
+| The agent's objects are in its own folder                         | Passed: the folder was empty before the agent ran and held three objects after the commit.    |
+| The worktree's Git links are unchanged                            | Passed: `commondir`, `gitdir` and `.git` hold their original values.                          |
+| Agent cannot write `/tmp/outside.txt`                             | Passed: `Read-only file system`; the file exists neither in the container nor in WSL.         |
+| Stop ends the session                                             | Passed: exit code 0 on the Board, no agent or sandbox process left, the commit still present. |
+
+One observation is not a failure of these checks. The sandbox leaves eleven empty read-only
+placeholders in the worktree, such as `.bashrc`, `.gitconfig`, `.mcp.json` and `.idea`. The
+agent's `git add -A` did not commit them, but Git run in the worktree from WSL lists them as
+untracked, so a commit made there outside the sandbox would include them.
 
 Codex was not checked under the sandbox and is unverified.
 
@@ -99,7 +121,7 @@ outside the sandbox. The first two were fixed and the third reduced and document
 fixes were self-reviewed only. The reviewer did not check the real sandbox or the Docker
 tests; the coordinating agent ran those. Not done from its minor findings: a size limit on
 copied objects, a forged-pack test in the suite, and showing a failed copy while the session
-still runs. The change was not run with a real logged-in Claude.
+still runs. The change was run with a real logged-in Claude in the re-check of 2026-11-25.
 
 Earlier work was reviewed by the
 implementing agent only; an independent agent review of it was attempted but unavailable
