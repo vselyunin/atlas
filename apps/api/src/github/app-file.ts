@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 export const AppSecretsSchema = z.strictObject({
@@ -76,7 +76,7 @@ export class AppFile {
 
   isUnder(directory: string): boolean {
     const inside = relative(canonical(directory), canonical(this.path));
-    return !inside.startsWith('..') && !isAbsolute(inside);
+    return inside !== '..' && !inside.startsWith(`..${sep}`) && !isAbsolute(inside);
   }
 
   private unreadable() {

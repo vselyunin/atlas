@@ -78,6 +78,10 @@ const RepositoryBodySchema = z.object({
 
 const InstallationSchema = z.object({ id: z.int().positive() });
 
+const ListedInstallationSchema = InstallationSchema.extend({
+  suspended_at: z.string().nullable().optional(),
+});
+
 const InstallationRepositoriesSchema = z.object({
   total_count: z.int().nonnegative(),
   repositories: z.array(RepositoryBodySchema),
@@ -349,25 +353,39 @@ export class GitHubClient {
     const operation = 'list installations';
     const ids: number[] = [];
     await this.pages(operation, '/app/installations', this.jwt(secrets), (body) => {
-      const page = parse(operation, z.array(InstallationSchema), body);
-      ids.push(...page.map((installation) => installation.id));
+      const page = parse(operation, z.array(ListedInstallationSchema), body);
+      // A suspended installation cannot be given tokens.
+      for (const installation of page) {
+        if (!installation.suspended_at) ids.push(installation.id);
+      }
       return page.length;
     });
     return ids;
   }
 
   // Runs `use` with a short-lived token that may only read metadata, and revokes it afterwards.
-  // With a repository ID, returns null when the installation does not cover that repository.
+  // Returns null without calling `use` when the installation cannot give one: it does not cover
+  // the repository (422), is suspended or otherwise refused (403), or was removed (404). A rate
+  // limit is still an error.
   private async withListingToken<T>(
     secrets: AppSecrets,
     installationId: number,
     repositoryId: number | undefined,
     use: (token: string) => Promise<T>,
   ): Promise<T | null> {
-    const minted = await this.mint(secrets, installationId, {
-      ...(repositoryId === undefined ? {} : { repository_ids: [repositoryId] }),
-      permissions: { metadata: 'read' },
-    });
+    let minted: { token: string; expiresAt: string } | null;
+    try {
+      minted = await this.mint(secrets, installationId, {
+        ...(repositoryId === undefined ? {} : { repository_ids: [repositoryId] }),
+        permissions: { metadata: 'read' },
+      });
+    } catch (error) {
+      const unusable =
+        error instanceof GitHubError &&
+        (error.code === 'not_found' || (error.code === 'unauthorized' && error.status === 403));
+      if (unusable) return null;
+      throw error;
+    }
     if (!minted) return null;
     try {
       return await use(minted.token);

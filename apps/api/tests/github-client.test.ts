@@ -213,6 +213,43 @@ describe('GitHubClient', () => {
     expect(github.state.installationTokens.size).toBe(0);
   });
 
+  it('skips suspended and unusable installations', async () => {
+    github.state.installations.push(
+      { id: 2, account: 'octo-org', suspended: true },
+      { id: 3, account: 'octo-org', mintFailure: 403 },
+      { id: 4, account: 'octo-org', mintFailure: 404 },
+      { id: 5, account: 'octo-org' },
+    );
+    github.state.repositories = [
+      ...repositories(2),
+      ...repositories(1, 2, 20),
+      ...repositories(1, 3, 30),
+      ...repositories(1, 4, 40),
+      ...repositories(1, 5, 50),
+    ];
+    const listed = await client.listRepositories(github.secrets);
+    expect(listed.map((repository) => repository.id)).toEqual([1, 2, 50]);
+    const minted = github.state.requests
+      .filter((request) => request.path.endsWith('/access_tokens'))
+      .map((request) => request.path);
+    expect(minted).not.toContain('/api/app/installations/2/access_tokens');
+
+    await expect(client.getRepositoryById(github.secrets, 50)).resolves.toMatchObject({
+      installationId: 5,
+    });
+    await expect(client.getRepositoryById(github.secrets, 30)).resolves.toBeNull();
+    expect(github.state.installationTokens.size).toBe(0);
+  });
+
+  it('still reports a rate limit on an installation token as rate_limited', async () => {
+    github.state.installations.push({ id: 2, account: 'octo-org', mintFailure: 'rate_limited' });
+    github.state.repositories = [...repositories(1), ...repositories(1, 2, 20)];
+    const listing = await failure(client.listRepositories(github.secrets));
+    expect(listing).toMatchObject({ code: 'rate_limited', status: 403 });
+    const lookup = await failure(client.getRepositoryById(github.secrets, 20));
+    expect(lookup).toMatchObject({ code: 'rate_limited', status: 403 });
+  });
+
   it('reports a server error as failed', async () => {
     github.state.failWith = 500;
     const error = await failure(client.describeApp(github.secrets));

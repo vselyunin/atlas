@@ -70,5 +70,8 @@ describe('AppFile', () => {
     expect(file.isUnder(join(directory, 'state', '..', 'state'))).toBe(true);
     expect(file.isUnder(join(directory, 'stat'))).toBe(false);
     expect(file.isUnder(join(directory, 'other'))).toBe(false);
+    const dotted = new AppFile(join(directory, '..atlas', 'github-app.json'));
+    expect(dotted.isUnder(directory)).toBe(true);
+    expect(new AppFile(join(directory, '..', 'github-app.json')).isUnder(directory)).toBe(false);
   });
 });

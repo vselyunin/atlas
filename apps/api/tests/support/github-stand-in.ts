@@ -23,6 +23,16 @@ export type StandInRepository = {
   installationId: number;
 };
 
+export type StandInInstallation = {
+  id: number;
+  account: string;
+  // A suspended installation is listed with `suspended_at` and refuses tokens with 403.
+  suspended?: boolean;
+  // Forces the token request to fail: 403 or 404 as GitHub answers for an installation that is
+  // unusable or was removed after listing, or an exhausted rate limit.
+  mintFailure?: 403 | 404 | 'rate_limited';
+};
+
 export type StandInInstallationToken = {
   token: string;
   installationId: number;
@@ -43,7 +53,7 @@ export type StandInState = {
   users: Record<string, StandInUser>;
   // The code the authorize page redirects back with; null shows a page instead of redirecting.
   authorizeCode: string | null;
-  installations: { id: number; account: string }[];
+  installations: StandInInstallation[];
   repositories: StandInRepository[];
   appPublic: boolean;
   appPermissions: Record<string, string>;
@@ -324,6 +334,7 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
         slice.map((installation) => ({
           id: installation.id,
           account: { login: installation.account },
+          suspended_at: installation.suspended ? '2026-11-01T00:00:00Z' : null,
         })),
         headers,
       );
@@ -343,8 +354,23 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
 
     if (method === 'POST' && (match = /^\/app\/installations\/(\d+)\/access_tokens$/.exec(path))) {
       const installationId = Number(match[1]);
-      if (!state.installations.some((installation) => installation.id === installationId)) {
+      const installation = state.installations.find((candidate) => candidate.id === installationId);
+      if (!installation || installation.mintFailure === 404) {
         return send(response, 404, { message: 'Not Found' });
+      }
+      if (installation.mintFailure === 'rate_limited') {
+        return send(
+          response,
+          403,
+          { message: 'API rate limit exceeded' },
+          {
+            'x-ratelimit-remaining': '0',
+            'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        );
+      }
+      if (installation.suspended || installation.mintFailure === 403) {
+        return send(response, 403, { message: 'This installation has been suspended' });
       }
       const repositoryIds = fields.repository_ids;
       if (
