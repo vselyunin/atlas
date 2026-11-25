@@ -9,6 +9,8 @@ import { openDatabase } from './db/client.js';
 import { ApiError, registerErrorHandlers } from './http/errors.js';
 import { registerOperationRoutes } from './operations/routes.js';
 import { registerProjectRoutes } from './projects/routes.js';
+import { SessionHub } from './sessions/hub.js';
+import { registerSessionRoutes } from './sessions/routes.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerVersionRoutes } from './versions/routes.js';
 import { registerGateway } from './workers/gateway.js';
@@ -68,7 +70,9 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     registerWorkerRoutes(app, context);
     registerTaskRoutes(app, context);
     registerOperationRoutes(app, context);
-    registerGateway(app, context, registry, workerToken);
+    const sessions = new SessionHub(context, registry);
+    registerSessionRoutes(app, sessions, allowedOrigin);
+    registerGateway(app, context, registry, workerToken, sessions);
     // Fastify owns the error handlers; round-trip every expected HTTP error via the shared shape.
     app.addHook('preSerialization', (request, reply, payload, done) => {
       if (reply.statusCode >= 400) {

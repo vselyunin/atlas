@@ -35,6 +35,12 @@ export function Dialog({
         <DialogPrimitive.Content
           ref={content}
           className={panel ? 'dialog-content task-panel' : 'dialog-content'}
+          onEscapeKeyDown={(event) => {
+            // Escape inside the agent terminal belongs to the agent, not to the dialog.
+            if (event.target instanceof Element && event.target.closest('.session-screen')) {
+              event.preventDefault();
+            }
+          }}
           onOpenAutoFocus={(event) => {
             const field = content.current?.querySelector<HTMLElement>(
               'input:not([disabled]), textarea:not([disabled]), select:not([disabled])',

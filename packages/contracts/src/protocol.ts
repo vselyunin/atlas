@@ -1,7 +1,16 @@
 import { z } from 'zod';
 import { ErrorInfoSchema, IdSchema, NameSchema, RelativePathSchema } from './common.js';
 import { API_BASE_PATH } from './http.js';
-import { REPOSITORY_INIT_CAPABILITY } from './workers.js';
+import {
+  SessionExitPayloadSchema,
+  SessionInputPayloadSchema,
+  SessionOutputPayloadSchema,
+  SessionResizePayloadSchema,
+  SessionStartPayloadSchema,
+  SessionStartedPayloadSchema,
+  SessionStopPayloadSchema,
+} from './sessions.js';
+import { AGENT_SESSION_CAPABILITY, REPOSITORY_INIT_CAPABILITY } from './workers.js';
 
 export const WORKER_CONNECT_PATH = `${API_BASE_PATH}/workers/connect`;
 export const PROTOCOL_VERSION = 1;
@@ -26,7 +35,11 @@ export const WorkerRegisterSchema = z.strictObject({
     workerId: IdSchema,
     name: NameSchema,
     workspaceRoot: z.string(),
-    capabilities: z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY)]),
+    // Workers that predate agent sessions advertise only repository initialization.
+    capabilities: z.union([
+      z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY)]),
+      z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY), z.literal(AGENT_SESSION_CAPABILITY)]),
+    ]),
   }),
 });
 
@@ -88,12 +101,52 @@ export const ProtocolErrorSchema = z.strictObject({
   payload: ErrorInfoSchema,
 });
 
+// Spike: agent terminal sessions.
+export const SessionStartSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.start'),
+  payload: SessionStartPayloadSchema,
+});
+export const SessionInputSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.input'),
+  payload: SessionInputPayloadSchema,
+});
+export const SessionResizeSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.resize'),
+  payload: SessionResizePayloadSchema,
+});
+export const SessionStopSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.stop'),
+  payload: SessionStopPayloadSchema,
+});
+export const SessionStartedSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.started'),
+  payload: SessionStartedPayloadSchema,
+});
+export const SessionOutputSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.output'),
+  payload: SessionOutputPayloadSchema,
+});
+export const SessionExitSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.exit'),
+  payload: SessionExitPayloadSchema,
+});
+
 export const WorkerToApiMessageSchema = z.discriminatedUnion('type', [
   WorkerRegisterSchema,
   WorkerHeartbeatSchema,
   CommandAcceptedSchema,
   CommandResultSchema,
   ProtocolErrorSchema,
+  SessionStartedSchema,
+  SessionOutputSchema,
+  SessionExitSchema,
 ]);
 
 export const ApiToWorkerMessageSchema = z.discriminatedUnion('type', [
@@ -101,7 +154,15 @@ export const ApiToWorkerMessageSchema = z.discriminatedUnion('type', [
   RepositoryInitCommandSchema,
   CommandResultAckSchema,
   ProtocolErrorSchema,
+  SessionStartSchema,
+  SessionInputSchema,
+  SessionResizeSchema,
+  SessionStopSchema,
 ]);
+
+export type SessionStarted = z.infer<typeof SessionStartedSchema>;
+export type SessionOutput = z.infer<typeof SessionOutputSchema>;
+export type SessionExit = z.infer<typeof SessionExitSchema>;
 
 export type WorkerRegister = z.infer<typeof WorkerRegisterSchema>;
 export type WorkerRegistered = z.infer<typeof WorkerRegisteredSchema>;

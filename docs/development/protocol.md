@@ -107,7 +107,7 @@ All messages use protocol version `1`. Command messages require a nonempty `comm
 
 | Direction    | Type                 | Payload                                                                                           |
 | ------------ | -------------------- | ------------------------------------------------------------------------------------------------- |
-| Worker → API | `worker.register`    | `{workerId,name,workspaceRoot,capabilities:["repository.init"]}`                                  |
+| Worker → API | `worker.register`    | `{workerId,name,workspaceRoot,capabilities}`; see [capabilities](#capabilities)                   |
 | API → Worker | `worker.registered`  | `{workerId,heartbeatIntervalMs:10000}`                                                            |
 | Worker → API | `worker.heartbeat`   | `{workerId}`                                                                                      |
 | API → Worker | `command.dispatch`   | `{kind:"repository.init",projectId,relativePath}`                                                 |
@@ -123,3 +123,43 @@ Send `worker.register` first within 5 seconds of upgrade. The API rejects duplic
 The Worker journals terminal results and replays unacknowledged results after registration. The API accepts a result only from the assigned Worker. It sends `command.result_ack` only after durable persistence, acknowledges identical duplicates and rejects conflicting outcomes for the same command ID. The Worker can mark its result acknowledged when that acknowledgment arrives.
 
 The API redispatches unresolved commands with their original IDs after reconnect. The Worker uses command IDs to deduplicate delivery and consult its journal. Delivery is at least once with deduplication. If the Worker cannot safely determine the outcome after a filesystem interruption, it reports `needs_attention`.
+
+### Capabilities
+
+A Worker registers with `["repository.init"]` or `["repository.init","agent.session"]`. The API rejects any other list. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it.
+
+## Agent sessions
+
+The session messages are covered by contract tests, API hub and socket tests, Worker session tests, an integration test with a stand-in agent and the Docker test group; `docs/development/acceptance.md` lists them. A session runs an agent CLI in a terminal on the Worker, inside a Git worktree made for one task. The task ID is the session ID, so a task has at most one session. Sessions live in memory: they end when the Worker stops, and the API forgets them when it restarts.
+
+Every session message carries the usual envelope and no `commandId`. Each payload has `sessionId` and `runId`. The API creates a new `runId` for every start and ignores Worker messages whose `runId` is not the current one.
+
+| Direction    | Type              | Payload besides `sessionId` and `runId`     |
+| ------------ | ----------------- | ------------------------------------------- |
+| API → Worker | `session.start`   | `{projectId,relativePath,prompt,cols,rows}` |
+| API → Worker | `session.input`   | `{data}`, at most 8,192 characters          |
+| API → Worker | `session.resize`  | `{cols,rows}`                               |
+| API → Worker | `session.stop`    | none                                        |
+| Worker → API | `session.started` | `{worktreePath,branch}`                     |
+| Worker → API | `session.output`  | `{data}`, at most 16,000 characters         |
+| Worker → API | `session.exit`    | `{exitCode,message}`, both nullable         |
+
+The Worker answers `session.start` for a session it already runs with `session.started` and adopts the new `runId`, so a restarted API can attach again. It answers input or a stop for a session it does not run with `session.exit`. Output produced while the Worker is disconnected is dropped.
+
+The Worker creates the worktree at `<workspaceRoot>/.atlas-worktrees/<encoded relativePath>/<task ID>` on branch `atlas/task-<task ID>` and reuses it on later starts. The agent command is `claude` unless `ATLAS_AGENT_COMMAND` is set on the Worker. The agent and Git run without any `ATLAS_*` environment variables. Unless `ATLAS_AGENT_SANDBOX=off`, the Worker runs the agent inside a sandbox and first writes one line about it to the terminal; see `docs/development/local-setup.md`. This adds no messages.
+
+### Board session socket
+
+The Board opens a WebSocket at `/api/v1/tasks/:taskId/session`. The API accepts it only when the `Origin` header equals the configured Board origin. Frames are JSON without an envelope.
+
+| Direction   | Message                                                       |
+| ----------- | ------------------------------------------------------------- |
+| Board → API | `{type:"start",cols,rows}`                                    |
+| Board → API | `{type:"input",data}`                                         |
+| Board → API | `{type:"resize",cols,rows}`                                   |
+| Board → API | `{type:"stop"}`                                               |
+| API → Board | `{type:"session",state,branch,worktreePath,exitCode,message}` |
+| API → Board | `{type:"output",data}`                                        |
+| API → Board | `{type:"error",message}`                                      |
+
+`state` is `none`, `starting`, `running` or `exited`. On connect the API sends the current `session` message and then replays up to 400,000 characters of recent output. A session can start only for a task in a ready project that a Worker initialized locally.

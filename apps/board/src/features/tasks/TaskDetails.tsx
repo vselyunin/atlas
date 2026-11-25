@@ -5,6 +5,7 @@ import { TaskResponseSchema, TaskStatusSchema, TASK_STATUS_LABELS } from '@atlas
 import type { Task, TaskCreate, TaskChanges, Worker, Version, TaskStatus } from '@atlas/contracts';
 import { Dialog } from '../../components/ui/dialog';
 import { request, errorMessage } from '../../lib/api';
+import { TaskSession } from '../sessions/TaskSession';
 import { TaskFields } from './TaskFields';
 
 export function TaskDetails({
@@ -59,6 +60,7 @@ export function TaskDetails({
       description={`${task.id.slice(0, 8).toUpperCase()} · ${TASK_STATUS_LABELS[task.status]}`}
       onClose={onClose}
     >
+      <TaskSession taskId={task.id} />
       <label className="status-field">
         Status
         <Select

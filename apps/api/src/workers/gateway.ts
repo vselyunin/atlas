@@ -13,6 +13,7 @@ import type { RawData } from 'ws';
 import type { ApiContext } from '../db/client.js';
 import { ApiError } from '../http/errors.js';
 import { applyAcceptance, applyResult, dispatchPending } from '../operations/service.js';
+import type { SessionHub } from '../sessions/hub.js';
 import type { WorkerRegistry } from './registry.js';
 
 function validAuthorization(header: string | undefined, expected: Buffer) {
@@ -47,6 +48,7 @@ export function registerGateway(
   context: ApiContext,
   registry: WorkerRegistry,
   workerToken: string,
+  sessions: SessionHub,
 ) {
   const authorization = Buffer.from(`Bearer ${workerToken}`);
   app.route({
@@ -146,6 +148,15 @@ export function registerGateway(
                 commandId,
                 payload: {},
               });
+              break;
+            case 'session.started':
+              sessions.onStarted(workerId, message.payload);
+              break;
+            case 'session.output':
+              sessions.onOutput(workerId, message.payload);
+              break;
+            case 'session.exit':
+              sessions.onExit(workerId, message.payload);
               break;
             case 'protocol.error':
               request.log.info({ requestId: request.id }, 'Worker reported a protocol error');

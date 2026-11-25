@@ -500,8 +500,67 @@ a {
   max-height: 100vh;
   transform: none;
   border-radius: 0;
-  width: min(470px, 100vw);
+  width: min(980px, 100vw);
   padding: 30px;
+}
+/* Spike: agent terminal in the task panel. */
+.session {
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.session-heading,
+.session-status {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.session-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.session-status {
+  margin: 14px 0 8px;
+}
+.session-status p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.session-screen {
+  height: min(520px, 60vh);
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--subtle);
+  overflow: hidden;
+}
+.session-frame {
+  position: relative;
+}
+.session-screen.idle {
+  pointer-events: none;
+}
+.session-screen.idle .xterm {
+  opacity: 0.35;
+}
+.session-overlay {
+  position: absolute;
+  inset: auto 12px 12px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  text-align: center;
+}
+.session-screen:focus-within {
+  border-color: var(--border-active);
 }
 .dialog-heading {
   display: flex;

@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:web": "node scripts/dev.mjs --web",
+    "worker:login": "node scripts/worker-login.mjs",
     "lint": "eslint . --max-warnings=0",
     "format": "node scripts/format.mjs",
     "format:check": "node scripts/format.mjs --check",
@@ -17,6 +19,7 @@
     "check": "pnpm lint && pnpm format:check && pnpm typecheck && pnpm test && pnpm build",
     "check:commits": "node scripts/check-commits.mjs",
     "test:integration": "vitest run tests/integration",
+    "test:docker": "vitest run tests/docker",
     "test:e2e": "pnpm --filter @atlas/contracts build && playwright test",
     "setup:hooks": "git config core.hooksPath .githooks"
   },

@@ -12,6 +12,7 @@ import type { WorkerToApiMessage, RepositoryInitCommand } from '@atlas/contracts
 import type { WorkerConfig } from './config.js';
 import type { Journal } from './state/journal.js';
 import { initializeRepository } from './repositories/initialize.js';
+import { SessionManager } from './sessions/manager.js';
 
 function text(data: RawData): string {
   if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
@@ -31,6 +32,8 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   };
   const envelope = () => ({ protocolVersion: 1 as const, messageId: randomUUID() });
+  // Spike: output produced while disconnected is dropped.
+  const sessions = new SessionManager(config, (event) => send({ ...envelope(), ...event }));
   const replay = () => {
     for (const entry of journal.entries()) {
       if (entry.outcome && !entry.acknowledged)
@@ -116,7 +119,7 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           workerId: config.id,
           name: config.name,
           workspaceRoot: config.root,
-          capabilities: ['repository.init'],
+          capabilities: ['repository.init', 'agent.session'],
         },
       });
     });
@@ -140,6 +143,16 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           dispatch(message);
         } else if (message.type === 'command.result_ack') {
           if (registered) journal.acknowledge(message.commandId);
+        } else if (message.type === 'session.start') {
+          if (!registered) throw new Error('Registration required');
+          void sessions.start(message.payload);
+        } else if (message.type === 'session.input') {
+          const { sessionId, runId, data } = message.payload;
+          sessions.input(sessionId, runId, data);
+        } else if (message.type === 'session.resize') {
+          sessions.resize(message.payload.sessionId, message.payload);
+        } else if (message.type === 'session.stop') {
+          sessions.stop(message.payload.sessionId, message.payload.runId);
         } else if (message.type === 'protocol.error') {
           console.error(`API: ${message.payload.message}`);
         }
@@ -170,6 +183,7 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
       clearTimeout(timer);
       clearInterval(heartbeat);
       await queue;
+      sessions.stopAll();
       registered = false;
       socket?.terminate();
     },
