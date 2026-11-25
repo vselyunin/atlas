@@ -23,6 +23,8 @@ When reporting verification, distinguish self-review from independent review. If
 
 Sign-in with GitHub is on by default (`ATLAS_AUTH=github`; `off` disables it, and `buildApp` without an `auth` option runs with it off). Tests never talk to github.com; they use local stand-ins, with `ATLAS_GITHUB_API_URL` and `ATLAS_GITHUB_WEB_URL` pointing at them. The GitHub App's secrets live in `.atlas/github-app.json` (`ATLAS_GITHUB_APP_FILE`), created with mode `0600`. It is a secret: never commit, print, log or copy it into a workspace root, Worker state directory or container. Setup, sessions, members and removal are described in [local setup](docs/development/local-setup.md); routes and access rules are in [protocol](docs/development/protocol.md).
 
+Repository links and clones: the API hands a Worker a short-lived, one-repository, read-only token for a clone over the Worker socket. It belongs to the API and the Worker's Git processes and must never reach the database, the journal, a Git config, a command line, a log or a task agent. Tests clone from the local stand-in Git server, with `ATLAS_GIT_HOST_URL` (Worker; default `https://github.com`) pointing at it. A project path whose first part starts with a dot is refused. Behaviour and limits are in [local setup](docs/development/local-setup.md).
+
 Repository skills provide focused workflows without replacing these rules:
 
 - [Atlas contract changes](.agents/skills/atlas-contract-changes/SKILL.md): shared schemas, HTTP/Worker messages and compatibility across consumers.

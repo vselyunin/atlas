@@ -85,16 +85,17 @@ Read these before you choose the account on the setup page.
 4. GitHub returns you to the Board. Atlas checks with GitHub that the App is not public and has
    only the rights it asked for, then writes the App file. If a check fails, Atlas stores nothing
    and the Board says why, but the App already exists on GitHub; see below.
-5. Choose "Install the App on GitHub" and pick the repositories the App may use. Atlas uses no
-   repository this iteration, but the choice is the account's limit for what comes next. GitHub
-   returns you to the Board.
+5. Choose "Install the App on GitHub" and pick the repositories the App may use. This choice is
+   the limit of what Atlas can link and clone (see "GitHub repositories"); you can change it later
+   on GitHub. GitHub returns you to the Board.
 6. Choose "Sign in with GitHub". You become the owner if you sign in with the browser that
    created the App. Use the same browser from step 2 to this step.
 
 The App asks for Contents (read and write), Pull requests (read and write) and Metadata (read).
-It does not ask for Workflows, has no webhook and subscribes to no events. Contents and Pull
-requests are requested now so that you do not have to approve a wider right on GitHub later;
-nothing in Atlas uses them yet. Sign-in itself grants no repository right.
+It does not ask for Workflows, has no webhook and subscribes to no events. Pull requests and
+Contents write are requested now so that you do not have to approve a wider right on GitHub
+later; nothing in Atlas uses them yet. Cloning uses Contents read only, and sign-in itself grants
+no repository right.
 
 If setup fails after GitHub already created the App, the App exists on GitHub but Atlas has
 forgotten it. This happens when the App turns out to be public, when its rights differ from what
@@ -140,13 +141,13 @@ needs the owner's session.
 
 ### Settings
 
-| Setting                 | Meaning                                                                                                                                                                                                                                                |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ATLAS_AUTH`            | API. `github` (default) or `off`. Any other value, including an empty one, stops the API at start.                                                                                                                                                     |
-| `ATLAS_GITHUB_APP_FILE` | API. Path of the App file. Default `.atlas/github-app.json`. `pnpm dev` resolves it from the repository root; for an API started by itself, use an absolute path, because the API package runs from its own folder.                                    |
-| `ATLAS_GITHUB_API_URL`  | API. GitHub's REST address. Default `https://api.github.com`. For tests that point the API at a stand-in; leave it unset.                                                                                                                              |
-| `ATLAS_GITHUB_WEB_URL`  | API. GitHub's web address. Default `https://github.com`. For the same purpose; leave it unset.                                                                                                                                                         |
-| `ATLAS_GIT_HOST_URL`    | Worker. The Git host the Worker uses for GitHub repositories. Default `https://github.com`; `http` is accepted only for a loopback address. `pnpm dev` passes it to the container. Atlas does not use it for sign-in; later work on repositories does. |
+| Setting                 | Meaning                                                                                                                                                                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_AUTH`            | API. `github` (default) or `off`. Any other value, including an empty one, stops the API at start.                                                                                                                                  |
+| `ATLAS_GITHUB_APP_FILE` | API. Path of the App file. Default `.atlas/github-app.json`. `pnpm dev` resolves it from the repository root; for an API started by itself, use an absolute path, because the API package runs from its own folder.                 |
+| `ATLAS_GITHUB_API_URL`  | API. GitHub's REST address. Default `https://api.github.com`. For tests that point the API at a stand-in; leave it unset.                                                                                                           |
+| `ATLAS_GITHUB_WEB_URL`  | API. GitHub's web address. Default `https://github.com`. For the same purpose; leave it unset.                                                                                                                                      |
+| `ATLAS_GIT_HOST_URL`    | Worker. The Git host the Worker uses for GitHub repositories. Default `https://github.com`; `http` is accepted only for a loopback address. `pnpm dev` passes it to the container. Atlas does not use it for sign-in; cloning does. |
 
 If you change `ATLAS_BOARD_ORIGIN`, GitHub still holds the old addresses. In the App's settings
 on GitHub (Settings, Developer settings, GitHub Apps, your App; for an organization's App, the
@@ -221,6 +222,140 @@ no users means deleting the database, which also deletes projects and tasks.
   checked, and what was not" in
   `docs/superpowers/specs/2026-11-25-github-connection-design.md`. The manual steps are in
   `docs/development/acceptance.md`, not yet run.
+
+## GitHub repositories
+
+With sign-in on and the App installed, a project can be linked to a GitHub repository, and a new
+project can be created by cloning one onto a Worker. Both need only the App and its installation;
+nothing else is set up. With `ATLAS_AUTH=off` neither works: the repository and link routes
+answer 409 `github_unavailable` and the Board does not offer the clone choice.
+
+### Link a project to a repository
+
+- Any signed-in person, member or owner, can link and unlink. Every signed-in person sees the
+  names of all repositories the App can access.
+- Only a ready project created from a folder on a Worker (the "New local repository" form, or a
+  clone) can be linked. A project made with "Existing repository" only records a URL and cannot be
+  linked. Select the project, then open Settings (the user menu in the Board header): the repository
+  section shows the link, or a picker with "Link", and "Unlink".
+- A project has one link. The same repository can be linked to several projects.
+- The Board lists the repositories the App can access, and a link to GitHub's page for changing
+  that selection. A repository that is not in the list was not selected for the App; choose it on
+  GitHub.
+- A link shows "not accessible" when the App no longer covers the repository, because the owner
+  removed it from the App's selection or replaced the App, or when GitHub cannot be reached at
+  that moment. Choose the repository for the App again on GitHub, or unlink. The link keeps the
+  name and default branch it had when it was made.
+- Linking changes nothing in the folder and sends nothing to the Worker, and Atlas does not check
+  that the repository's history matches the folder's.
+- Unlinking is refused (409 `project_not_linkable`) while the project's own clone is still
+  running, because the clone needs the link to be sent again after a reconnect.
+
+### Clone a repository into a new project
+
+1. Start the Worker with a version that can clone (`pnpm dev` builds the image on every start). A
+   Worker that cannot clone is not offered for this choice; an API that is older than the Worker
+   refuses the Worker's registration, so update the API first.
+2. In "New project" choose "Clone from GitHub", pick a repository, a Worker and a folder. The
+   folder is relative to the Worker's workspace, is filled in with the repository's name, and
+   must not exist. Its first part must not start with a dot.
+3. The project shows "Cloning your repository" until the Worker finishes. Large repositories take
+   minutes.
+
+What the Worker does: creates the folder, journals it, asks the API for a credential, reads the
+repository's default branch with `git ls-remote`, fetches every branch with `git fetch`, then adds
+`origin` (an address without any credential), checks out the default branch and writes the journal
+stage `cloned`. It fetches no submodules and no LFS content, and runs no hooks. The command is
+`succeeded` only after every step succeeded.
+
+- Two Git processes hold the token, one after the other, not one. Git 2.39 in the Worker image
+  cannot report the remote's default branch from a fetch, so `ls-remote` reads it first. Both are
+  started the same way, neither runs repository content, and the steps that check out files never
+  hold the token.
+- Those two processes run with a clean Git environment: the system and the user Git configuration
+  are ignored, every other credential helper and prompt is off, redirects are not followed, TLS
+  verification is on, and only `https` is allowed. A system-wide `http.proxy` or `sslCAInfo`
+  inside the Worker image or on the Worker host is therefore not used for a clone.
+- The Worker builds the address from `ATLAS_GIT_HOST_URL`, default `https://github.com`. It
+  accepts `http` only for a loopback address (the tests' stand-in) and refuses to start with any
+  other `http` address. `pnpm dev` passes the setting to the container.
+- Time limits: each of the two token-holding Git steps is ended after 30 minutes
+  (`clone_timeout`); each local step after 10 minutes; the Worker waits 30 seconds for the API's
+  credential reply. Creating a task's worktree has a 30-second limit of its own; check it with a
+  large repository (see `docs/development/acceptance.md`).
+- If the command fails or is refused, the folder stays, as with a new local repository, and the
+  project is `failed`. Atlas has no retry, cancel or delete for a project. Create a new project
+  with another folder name, or look at the folder, remove it on the Worker's disk and reuse its
+  name. If the Worker stops while a clone runs, the Git process is ended and the project ends
+  `needs_attention`: inspect the folder before you use the name again.
+- A clone still queued when the Worker stops has not started; the API sends it again when the
+  Worker registers again. A clone the API sent while the Worker was offline waits the same way.
+- The `repository.clone` capability: the API creates a clone only on an online Worker that
+  registered it, otherwise it answers 503 `worker_unavailable` and writes nothing. Older Workers
+  keep working for new local repositories and sessions.
+
+### Credentials
+
+- The API gives a Worker a token for one command: one repository, read-only Contents, with the
+  lifetime GitHub sets (up to one hour). The token is never inside the command. The Worker asks
+  for it when it is about to run Git, over the Worker socket, and the API answers only for a
+  clone it sent on that same connection, once per send, and refuses a command that has finished.
+- The 15-minute window counts from the latest send of the command and limits only when a token
+  may be issued. A token issued inside the window keeps working after it. A token is revoked at
+  the first of: the command's result, the Worker's Git time limit after the grant (61 minutes),
+  the API stopping, and a newer grant for the same command. A grant that could not be delivered is
+  revoked at once.
+- At most three requests per send reach GitHub; a fourth is refused without asking GitHub.
+- Refusals and when they happen: `unknown_command`, `wrong_connection` (another Worker's command,
+  or another connection), `command_finished`, `wrong_kind` (not a clone), `already_granted` (a
+  token was given or is being requested, or three attempts were used), `grant_window_closed`,
+  `github_unavailable` (sign-in is off, the App file is unreadable, or GitHub failed or took
+  longer than 20 seconds), `app_file_exposed` (the App file lies in a Worker's workspace) and
+  `repository_not_accessible` (no link, or the App no longer covers the repository). A refusal
+  fails the clone with that code and message. If the repository was renamed, the clone fails with
+  `repository_renamed`: link the project again.
+- The API logs one line for every grant and refusal: the command, the Worker, the repository and
+  the rights (`contents:read`). It never logs the token.
+- The token is held in memory by the API and the Worker. It never reaches the database, the
+  Worker journal, a Git configuration, a command line, a log or a task's agent: the Git processes
+  run outside the agent sandbox, an agent cannot read another process's environment or the Worker
+  state directory, and by default its network filter does not allow GitHub's hosts. Do not add
+  GitHub hosts to `ATLAS_AGENT_ALLOWED_DOMAINS`, and do not run an unsandboxed Worker if this
+  matters to you (see "What the sandbox does not protect").
+- If the API crashes, it forgets which tokens it handed out and cannot revoke them. They stay
+  valid until GitHub expires them, at most an hour after they were issued.
+
+### Compatibility
+
+- A project path whose first part starts with a dot is refused: the API answers 400
+  `invalid_relative_path` when you create a `local` project, and the Worker refuses it too.
+  `.atlas-worktrees` holds task worktrees, and a project inside it would sit in a folder agents
+  can write. A project that already has such a path stays in the list, but its sessions cannot
+  start: the session ends at once with the message "Choose a relative folder path without dot
+  segments, not starting with a dot". Atlas cannot change a stored project's path, so create the
+  project again under another name.
+- An older Worker without `repository.clone` keeps working for `repository.init` and sessions; a
+  newer API never sends it a clone. The reverse needs the API updated first.
+- New Worker messages: `credential.request`, `credential.grant` and `credential.refusal`. See
+  `docs/development/protocol.md`.
+
+### Known limits
+
+- The check that keeps the App file out of a Worker's workspace root compares paths as the API sees
+  them, and only for Workers already registered in its database. A Docker Worker reports container
+  paths and so cannot be checked against its host mounts. Keep the App file out of the folder
+  `pnpm dev` mounts yourself.
+- A second clone queued behind a clone that runs longer than 15 minutes is refused with
+  `grant_window_closed`: the window counts from the send, and the Worker runs commands one at a
+  time. Create it again after the first finishes.
+- A clone that stays pending blocks unlinking its project, and there is no way to cancel it.
+- With sign-in off, a create request that carries `githubRepositoryId` currently ignores the field
+  and initializes an empty repository. This is the current behaviour and it is under review; the
+  Board does not offer the choice with sign-in off.
+- A Worker run natively, or with `ATLAS_AGENT_SANDBOX=off`, runs its agents as your own account,
+  which can read the environment of the Worker's Git processes while a clone runs.
+- All Workers share one token; whoever has it can register as an offline Worker and receive its
+  commands, and so its credentials.
 
 ## Docker in WSL
 

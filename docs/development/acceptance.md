@@ -136,6 +136,56 @@ personal App, record "GitHub refused the account" as the outcome of step 8 and s
     enter it on the setup page, then sign in. Expected: that browser becomes the owner. Without
     the code, signing in from that browser is refused.
 
+### Manual checks with real GitHub: linking, cloning and credentials
+
+Status: not yet run. The automated tests for linking, cloning and credentials use a local
+stand-in for GitHub and a local stand-in Git server and never reach github.com, so only these
+steps cover the real service. Do the sign-in and setup checks above first: the App must exist,
+and you must be signed in as the owner. You need one private repository the App is installed on,
+one more repository it is not installed on, and `pnpm dev` with the Worker online (the Worker
+image builds with Git 2.39 and clones over HTTPS). Do not write down any token, the owner code or
+the App file's content.
+
+1. Run `pnpm dev`. In Settings, choose "Choose repositories" and select only the private test
+   repository. Expected: GitHub returns to the Board.
+2. Create a project with "New local repository", wait until it is ready, select it and open
+   Settings. In the repository section choose the test repository and "Link". Expected: the
+   repository's name and default branch show, with no "not accessible" message.
+3. Reload. Expected: the link is still there. Choose "Unlink". Expected: the link is gone. Link
+   again.
+4. On GitHub, remove the repository from the App's selection and reload the Board. Expected: the
+   link shows "not accessible". Select the repository again. Expected: the message goes.
+5. Create a project with "Clone from GitHub", the test repository, the online Worker and a new
+   folder name. Expected: "Cloning your repository" shows, then the project becomes ready with a
+   task board. In WSL, in the new folder: `git log --oneline` shows the repository's history,
+   `git branch -a` shows its branches with the default one checked out, and
+   `git remote -v` shows an address without any credential (no `x-access-token`, no token).
+6. In the same folder run `grep -r x-access-token .git; git config --list --show-origin`.
+   Expected: no token anywhere in `.git` or the configuration.
+7. Start a session on the cloned project and run, from the agent's terminal or a shell in the
+   worktree, `env`. Expected: no token and no `ATLAS_*` variable.
+8. Try the same create with a repository the App is not installed on (use its ID with the API, or
+   remove it from the App's selection after the Board listed it). Expected: refused with
+   `repository_not_accessible` and no project appears.
+9. On GitHub, open the App's settings and its installation. Expected: the App has Contents (read
+   and write), Pull requests (read and write) and Metadata (read) and nothing else; no
+   Workflows; no webhook; no events; the installation is limited to the repositories you
+   chose. Atlas asks for each clone a token that is limited to one repository and to Contents
+   read; GitHub does not show these tokens, so this part is covered by the stand-in tests, and
+   the API log line (`Granted a repository credential`) shows the rights `contents:read`.
+10. Sign in with a second GitHub account that is not the owner and not a member, in another
+    browser. Expected: refused, as in the sign-in checks. As the owner, add it as a member, sign
+    in with it and clone a repository. Expected: the clone works, because every signed-in person
+    can clone every repository the App can access. Remove the member again.
+11. Stop the Worker container (`docker stop atlas-worker`) while a clone of a large repository
+    runs. Expected: the project ends "needs attention" and its folder stays; start `pnpm dev`
+    again and check the folder before you reuse its name.
+12. Time limit for task worktrees: with a real, large repository cloned onto the workspace (on a
+    Windows drive, as in this checkout), create a task, move it to Working and start a session.
+    Expected: the worktree is created and the session starts. If the Board reports that creating
+    the worktree took too long, the 30-second limit in `apps/worker/src/sessions/worktree.ts`
+    needs raising; record the repository's size and the time it took.
+
 ## Review and test permissions
 
 The container and sandbox work was split into 11 tasks. Tasks 1 to 10 each had an independent

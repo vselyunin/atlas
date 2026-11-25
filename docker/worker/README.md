@@ -36,6 +36,28 @@ triggers: it never recurses into submodules or clones from a local path, builds 
 validated `owner/name`, answers credentials only through its own helper for the configured host,
 and runs every Git step with hooks off. Rebuilding the image picks up later Debian fixes.
 
+## Cloning from GitHub
+
+What the image needs for `repository.clone`:
+
+- Git 2.39 or newer with HTTPS support and `ca-certificates`, both from the image's Debian
+  packages. Git 2.39 cannot report a remote's default branch while it fetches, so the Worker runs
+  `git ls-remote --symref` first; both commands hold the token, one after the other.
+- The credential helper `git-credential-helper.sh`. The Worker's build copies it next to the
+  compiled code (`dist/repositories`), so it ships inside the image and needs no setup. Git runs
+  it with `/bin/sh` and it answers only for the configured Git host. It reads the token from one
+  environment variable of that Git process and never writes it anywhere.
+- `ATLAS_GIT_HOST_URL`, when the Git host is not `https://github.com`. `pnpm dev` passes it to the
+  container if it is set. `http` is accepted only for a loopback address. The image contains no
+  token and no GitHub address of its own.
+
+The Worker runs these Git processes itself, outside the agent sandbox, with a clean environment:
+no `ATLAS_*` variables, no user Git configuration and, for the two that hold the token, no system
+configuration either, so the image's `safe.directory` entry and any system `http.proxy` or
+`sslCAInfo` are not used for them. The agent sandbox cannot read the Worker's environment (an agent
+sees only its own processes) or the Worker state directory, and it does not allow GitHub's hosts
+unless `ATLAS_AGENT_ALLOWED_DOMAINS` lists them; do not add them.
+
 ## Seccomp profile
 
 The agent sandbox uses bubblewrap, which needs `clone`, `clone3`, `unshare`, `mount`, `umount2` and

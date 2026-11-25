@@ -233,6 +233,7 @@ The file must not be inside a workspace root or a Worker state directory. The
 API refuses to start, and refuses to grant a credential, when the file's path
 lies under the workspace root of any registered Worker. The API never returns
 any of these values and never logs them.
+(amended — see Amendments after approval)
 
 `scripts/dev.mjs` must resolve the file's path from the repository root, as it
 already does for the database path; the API package runs with its own folder as
@@ -273,11 +274,13 @@ has its own token check and is independent of sign-in.
 6. The owner signs in. A sign-in becomes the owner only if the database has no
    owner and the browser carries the setup mark. The mark does not expire by
    time; it ends when an owner exists.
+   (amended — see Amendments after approval)
 
 If the setup mark is lost, for example the owner finishes in another browser,
 nobody becomes owner by signing in. While the installation is set up but has no
 owner, the API writes a one-time owner code to its own output at start, and the
 sign-in page accepts it in place of the mark. There is no "first sign-in wins".
+(amended — see Amendments after approval)
 
 If the database already has an owner, every setup endpoint requires that
 owner's session. Sessions do not depend on the App file, so the owner stays
@@ -371,6 +374,7 @@ other value, including an empty one, stops the server at start.
 The user chose this on 2026-11-25 over making every existing test sign in; see
 "Tests". Its purpose is to keep the existing tests, which call the API without
 signing in, unchanged. It follows the precedent of `ATLAS_AGENT_SANDBOX=off`.
+(amended — see Amendments after approval)
 
 ### Linking a project to a repository
 
@@ -387,6 +391,7 @@ Any signed-in user can link a ready `local` project to a repository.
   the Board shows the link as not accessible and anything that needs GitHub
   fails with that message.
 - A project has at most one link. A link can be removed.
+  (amended — see Amendments after approval)
 - Linking sends nothing to the Worker and changes nothing in the checkout. The
   push iteration can push to the repository's address directly, so no Git
   remote is needed, and the agent-readable Git config stays untouched.
@@ -409,6 +414,7 @@ Creating a project gains a third choice beside "new local repository" and
   naming the repository's numeric ID. The project is stored as a `local`
   project, with a Worker and a relative path, plus a link as above, so the
   session hub's check for a local checkout passes unchanged.
+  (amended — see Amendments after approval)
 - The API dispatches a new command kind, `repository.clone`, carrying the
   project ID, the relative path and the repository's `owner/name`. It carries
   no credential.
@@ -431,6 +437,7 @@ A clone can take minutes, and the Worker runs commands one at a time and waits
 for them when it stops. A clone must not hold up shutdown: when the Worker
 stops, it ends the Git process, and the command is `needs_attention` on the
 next start. `pnpm dev` stops the container after ten seconds.
+(amended — see Amendments after approval)
 
 Creating a session's worktree has a 30-second limit today. The builder checks
 that limit against a real repository on the user's workspace, which is on a
@@ -447,6 +454,7 @@ The API and the Worker both reject a project path whose first part starts with
 a dot, for init and for clone. Existing projects are not affected unless one
 already has such a path; if an existing test depends on such a path, stop and
 ask the user.
+(amended — see Amendments after approval)
 
 ### How a Worker receives a credential
 
@@ -463,6 +471,7 @@ for separately, at the moment it is needed:
 - The API gives one grant per dispatch of a command, and none later than a
   fixed time after that dispatch. A command dispatched again after a reconnect
   can be granted again.
+  (amended — see Amendments after approval)
 - The API asks GitHub for a token limited to that project's linked repository
   and to the rights the command kind needs: Contents read for a clone.
 - The API answers with the token, its expiry and the repository's current
@@ -475,12 +484,14 @@ for separately, at the moment it is needed:
 - When the command's result arrives, or the time limit passes, the API asks
   GitHub to revoke the token, if live check 4 shows that is possible. For that
   it keeps the token in memory until then.
+  (amended — see Amendments after approval)
 - Neither side writes the token to disk or logs the message that carries it.
 
 This is the first request and reply on the Worker socket. The reply names the
 command ID. If no reply comes within a time limit, or the connection drops
 while the Worker waits, the Worker ends the command as `needs_attention`
 without having run Git.
+(amended — see Amendments after approval)
 
 How the Worker runs Git with the token:
 
@@ -493,6 +504,7 @@ How the Worker runs Git with the token:
   config; other credential helpers and terminal prompts are off; only HTTPS is
   allowed. Checking out the files is a second Git process that does not have
   the token.
+  (amended — see Amendments after approval)
 - Every Git process the Worker starts for a command gets an environment without
   `ATLAS_*` variables, as the session code already does. Today `git init` is
   started with the Worker's full environment, including the Worker token; fix
@@ -737,3 +749,63 @@ result:
 Not taken: the reviewer suggested cutting members and roles from the first
 iteration. They stay, because users of an installation are the reason the user
 gave for sign-in.
+
+## Amendments after approval
+
+Written on 2026-11-25 while documenting the built behaviour. The approved sections
+above are unchanged, apart from a pointer line in each affected section. Where this
+list and an approved section disagree, the built behaviour is the one listed here.
+
+- Two Git processes hold the token, one after the other, instead of one. Git 2.39 in
+  the Worker image cannot report the remote's default branch from a fetch, so
+  `git ls-remote --symref` reads it first. Both get the same locked-down setup, and
+  neither runs repository content. Cloning with `--no-checkout` would break the
+  init-first order and the tag rule.
+- Those two processes also ignore the system Git configuration, not only the user's
+  (`GIT_CONFIG_NOSYSTEM`), so a system `http.proxy` or `sslCAInfo` is not used for a
+  clone. System configuration could weaken TLS, add headers or add a credential helper.
+- The setup mark cookie lapses after 30 days. The approved text said it does not
+  expire by time; it still ends on the server when an owner exists.
+- The one-time owner code is entered on the setup page ("Use owner code"), not on the
+  sign-in page, because the setup page is what the Board shows before an owner exists.
+  The code is created only at API start.
+- The App file's workspace check runs at API start and at every credential grant, as
+  approved, but it compares the paths the API sees and only for Workers already
+  registered in its database. A Docker Worker reports container paths, and a Worker
+  that registers after the start is not checked until a grant, so the check does not
+  cover those cases (see the setup guide's known limits).
+- The 15-minute window limits only when a token may be issued, counted from the latest
+  dispatch. A granted token is revoked at the command's result, at the Worker's Git
+  time limit after the grant (two 30-minute processes and a minute's margin), when a
+  newer grant for the command replaces it, or when the API stops. The approved text
+  revoked "when the time limit passes", which a slow clone could trigger mid-fetch.
+- Credential requests that reach GitHub are capped at 3 per dispatch, one at a time.
+  Later ones are refused `already_granted` without calling GitHub. A grant that cannot
+  be delivered is revoked at once.
+- Unlinking is refused with 409 `project_not_linkable` while the project's own clone
+  is pending or accepted, because the clone needs the link to be sent again after a
+  reconnect. The approved text said a link can be removed. A clone stuck in that state
+  therefore blocks unlinking, and there is no cancel.
+- A project path whose first part starts with a dot is refused at create (API 400
+  `invalid_relative_path`, and the Worker). The same check runs when a session starts,
+  so an existing project with such a path stays listed but cannot start a session; the
+  session ends at once with the Worker's message. The approved text only said that
+  existing projects "are not affected".
+- `GET /github/connection` is not registered while sign-in is off (404), whereas
+  `GET /github/repositories` and the link routes exist and answer 409
+  `github_unavailable`. The approved text gave no status.
+- With sign-in off, a create that carries `githubRepositoryId` ignores the field and
+  initializes an empty repository. The plan said 409 `github_unavailable`; changing it
+  needs permission to change an existing test. This is the current behaviour and it is
+  under review.
+- A clone still queued when the Worker stops is not started and gets no result; the
+  API sends it again when the Worker registers again. The approved text said it is
+  `needs_attention` on the next start, which holds for a clone that was running.
+- The Worker runs `git init` for the new folder before it asks for a credential. A
+  missing reply therefore ends the command as `needs_attention` after a local Git
+  step, not "without having run Git"; no Git step that reaches the network has run.
+- A second clone queued on a Worker behind one that runs longer than 15 minutes is
+  refused `grant_window_closed`, because the window counts from dispatch and the Worker
+  runs commands one at a time.
+- Creating a task's worktree still has its 30-second limit. The check against a real
+  repository on the Windows drive is in the acceptance checks and has not been run.
