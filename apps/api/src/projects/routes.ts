@@ -31,6 +31,7 @@ export function registerProjectRoutes(
       context,
       registry,
       parseInput(ProjectCreateSchema, request.body),
+      request.user?.id,
     );
     if (operation) dispatchPending(context, registry, operation.workerId, operation.id);
     return reply.code(operation ? 202 : 201).send(

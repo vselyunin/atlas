@@ -5,8 +5,10 @@ import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
 import { registerAccess, trackRoutes } from './auth/access.js';
-import { registerAuthRoutes } from './auth/routes.js';
+import { registerMemberRoutes } from './auth/members.js';
+import { registerAuthRoutes, registerSignInRoutes } from './auth/routes.js';
 import { SessionStore } from './auth/sessions.js';
+import { SignInService } from './auth/signin.js';
 import type { ApiOptions } from './config.js';
 import { isLocalHost, validateOptions } from './config.js';
 import { openDatabase } from './db/client.js';
@@ -30,7 +32,7 @@ import { registerWorkerRoutes } from './workers/routes.js';
 export type { ApiOptions, AuthOptions } from './config.js';
 
 export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
-  const { dbPath, workerToken, allowedOrigin, now, logger, logStream, auth } =
+  const { dbPath, workerToken, allowedOrigin, now, logger, logStream, auth, sessionRecheckMs } =
     validateOptions(options);
   const database = openDatabase(dbPath, now);
   const context = { db: database.db, now };
@@ -82,7 +84,7 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     }
     await app.register(cors, {
       origin: allowedOrigin,
-      methods: ['GET', 'POST', 'PATCH'],
+      methods: ['GET', 'POST', 'PATCH', 'DELETE'],
       allowedHeaders: ['Content-Type'],
       strictPreflight: false,
     });
@@ -98,19 +100,37 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
         this.websocketServer.close(done);
       },
     });
+    const sessions = new SessionHub(context, registry, sessionRecheckMs);
+    app.addHook('onClose', (_app, done) => {
+      sessions.close();
+      done();
+    });
+    // Removing a member closes their open Board session sockets at once.
+    authSessions.onUserRemoved((userId) => sessions.closeForUser(userId));
     registerAccess(app, context, authSessions, appFile);
     registerAuthRoutes(app, context, authSessions, auth, appFile);
     if (setup && appFile && github && auth) {
       registerSetupRoutes(app, setup, allowedOrigin);
       registerGithubRoutes(app, appFile, github, auth.githubWebUrl);
+      const signin = new SignInService({
+        context,
+        appFile,
+        github,
+        sessions: authSessions,
+        setup,
+        boardOrigin: allowedOrigin,
+      });
+      registerSignInRoutes(app, signin, authSessions, allowedOrigin, (userId) =>
+        sessions.recheckUser(userId),
+      );
+      registerMemberRoutes(app, context, authSessions);
     }
     registerProjectRoutes(app, context, registry);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);
     registerTaskRoutes(app, context);
     registerOperationRoutes(app, context);
-    const sessions = new SessionHub(context, registry);
-    registerSessionRoutes(app, sessions, allowedOrigin);
+    registerSessionRoutes(app, sessions, allowedOrigin, appFile ? authSessions : undefined);
     registerGateway(app, context, registry, workerToken, sessions);
     // Fastify owns the error handlers; round-trip every expected HTTP error via the shared shape.
     app.addHook('preSerialization', (request, reply, payload, done) => {

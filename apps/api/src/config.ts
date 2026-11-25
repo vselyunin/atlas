@@ -42,7 +42,11 @@ export interface ApiOptions extends z.infer<typeof optionsSchema> {
   // Sends the log to this stream instead of standard output, and turns the log on.
   logStream?: { write(line: string): void };
   auth?: AuthOptions;
+  // How often an open Board session socket checks that its session still exists.
+  sessionRecheckMs?: number;
 }
+
+const SESSION_RECHECK_MS = 30_000;
 
 export type ResolvedAuthOptions = Required<AuthOptions>;
 
@@ -71,6 +75,10 @@ export function validateOptions(options: ApiOptions) {
     logger: options.logger ?? false,
     logStream: options.logStream,
     auth: resolveAuth(options.auth),
+    sessionRecheckMs: z
+      .int()
+      .positive()
+      .parse(options.sessionRecheckMs ?? SESSION_RECHECK_MS),
   };
 }
 

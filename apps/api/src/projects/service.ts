@@ -37,6 +37,8 @@ export function createProject(
   context: ApiContext,
   registry: WorkerRegistry,
   input: ProjectCreate,
+  // The signed-in user, recorded in the database only; never part of a response.
+  createdBy?: string,
 ): ProjectCreateResponse {
   return context.db.transaction(
     (tx) => {
@@ -59,8 +61,9 @@ export function createProject(
         createdAt: now,
         updatedAt: now,
       };
+      const row = () => ({ ...project, createdBy: createdBy ?? null });
       if (input.repository.mode === 'existing') {
-        tx.insert(projects).values(project).run();
+        tx.insert(projects).values(row()).run();
         addVersion(tx, project.id, 'v0.1', now);
         return { project, operation: null };
       }
@@ -99,7 +102,7 @@ export function createProject(
       };
       project.state = 'pending';
       project.operationId = operation.id;
-      tx.insert(projects).values(project).run();
+      tx.insert(projects).values(row()).run();
       tx.insert(operations)
         .values({ ...operation, workspaceRoot: worker.workspaceRoot })
         .run();

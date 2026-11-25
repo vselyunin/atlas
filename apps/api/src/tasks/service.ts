@@ -40,6 +40,8 @@ export function createTask(
   projectId: string,
   versionId: string,
   input: TaskCreate,
+  // The signed-in user, recorded in the database only; never part of a response.
+  createdBy?: string,
 ): Task {
   return context.db.transaction(
     (tx) => {
@@ -58,7 +60,9 @@ export function createTask(
         createdAt: now,
         updatedAt: now,
       };
-      tx.insert(tasks).values(task).run();
+      tx.insert(tasks)
+        .values({ ...task, createdBy: createdBy ?? null })
+        .run();
       return task;
     },
     { behavior: 'immediate' },

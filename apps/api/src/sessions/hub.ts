@@ -36,14 +36,73 @@ interface Session {
   size: number;
 }
 
+// The close code for a socket whose sign-in session ended.
+export const SESSION_ENDED_CLOSE_CODE = 4401;
+
+interface Watch {
+  timer: NodeJS.Timeout;
+  check: () => void;
+}
+
 export class SessionHub {
   private readonly sessions = new Map<string, Session>();
   private readonly viewers = new Map<string, Set<WebSocket>>();
+  // Signed-in sockets by user, each with its session check and the timer that repeats it.
+  private readonly watched = new Map<string, Map<WebSocket, Watch>>();
 
   constructor(
     private readonly context: ApiContext,
     private readonly registry: WorkerRegistry,
+    private readonly recheckMs = 30_000,
   ) {}
+
+  // Keeps a signed-in socket open only while `isValid` holds: rechecked on a timer, at once by
+  // recheckUser, and ended by closeForUser. The timer stops when the socket closes.
+  watch(socket: WebSocket, userId: string, isValid: () => boolean): void {
+    const check = () => {
+      let valid = false;
+      try {
+        valid = isValid();
+      } catch {
+        // A failed check counts as an ended session.
+      }
+      if (!valid) this.endSocket(socket);
+    };
+    const timer = setInterval(check, this.recheckMs);
+    timer.unref();
+    const sockets = this.watched.get(userId) ?? new Map<WebSocket, Watch>();
+    sockets.set(socket, { timer, check });
+    this.watched.set(userId, sockets);
+    socket.once('close', () => {
+      clearInterval(timer);
+      sockets.delete(socket);
+      if (sockets.size === 0 && this.watched.get(userId) === sockets) this.watched.delete(userId);
+    });
+  }
+
+  // Ends every signed-in socket of the user: all their sessions are gone.
+  closeForUser(userId: string): void {
+    for (const socket of this.watched.get(userId)?.keys() ?? []) this.endSocket(socket);
+  }
+
+  // Checks the user's sockets now, for example after one of their sessions was signed out.
+  recheckUser(userId: string): void {
+    for (const { check } of this.watched.get(userId)?.values() ?? []) check();
+  }
+
+  // Stops every recheck timer; called when the API shuts down.
+  close(): void {
+    for (const sockets of this.watched.values()) {
+      for (const { timer } of sockets.values()) clearInterval(timer);
+    }
+    this.watched.clear();
+  }
+
+  private endSocket(socket: WebSocket) {
+    if (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING) {
+      socket.close(SESSION_ENDED_CLOSE_CODE, 'Sign in to continue');
+    }
+  }
 
   attach(taskId: string, socket: WebSocket): void {
     const viewers = this.viewers.get(taskId) ?? new Set();
