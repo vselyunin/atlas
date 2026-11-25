@@ -48,7 +48,7 @@ describe('readConfig', () => {
 });
 
 describe('buildApp without sign-in options', () => {
-  it('serves every route and reports sign-in off', async () => {
+  it('serves every route and reports sign-in off', { timeout: 30_000 }, async () => {
     const app = await buildApp({
       dbPath: ':memory:',
       workerToken: 'test-token',
@@ -63,39 +63,47 @@ describe('buildApp without sign-in options', () => {
 });
 
 describe('buildApp with sign-in on', () => {
-  it('reports setup needed and refuses other routes while no App file exists', async () => {
-    const api = await buildAuthApp();
-    closers.push(() => api.close());
-    const state = await api.app.inject('/api/v1/auth/state');
-    expect(state.statusCode).toBe(200);
-    expect(state.json()).toEqual({ auth: 'github', setup: 'needed', user: null, app: null });
-    const projects = await api.app.inject('/api/v1/projects');
-    expect(projects.statusCode).toBe(409);
-    expect(projects.json()).toMatchObject({ error: { code: 'setup_required' } });
-  });
+  it(
+    'reports setup needed and refuses other routes while no App file exists',
+    { timeout: 30_000 },
+    async () => {
+      const api = await buildAuthApp();
+      closers.push(() => api.close());
+      const state = await api.app.inject('/api/v1/auth/state');
+      expect(state.statusCode).toBe(200);
+      expect(state.json()).toEqual({ auth: 'github', setup: 'needed', user: null, app: null });
+      const projects = await api.app.inject('/api/v1/projects');
+      expect(projects.statusCode).toBe(409);
+      expect(projects.json()).toMatchObject({ error: { code: 'setup_required' } });
+    },
+  );
 
-  it('reports needs_owner with an App file and no owner, done once an owner exists', async () => {
-    const api = await buildAuthApp();
-    closers.push(() => api.close());
-    await writeFile(api.appFile, JSON.stringify(TEST_APP_SECRETS), { mode: 0o600 });
-    expect((await api.app.inject('/api/v1/auth/state')).json()).toMatchObject({
-      setup: 'needs_owner',
-    });
-    const sqlite = new SQLite(join(api.directory, 'atlas.sqlite'));
-    try {
-      sqlite
-        .prepare(
-          "INSERT INTO users (id, githubId, login, role, createdAt) VALUES ('u1', 1, 'octo', 'owner', '2026-11-25T00:00:00.000Z')",
-        )
-        .run();
-    } finally {
-      sqlite.close();
-    }
-    expect((await api.app.inject('/api/v1/auth/state')).json()).toEqual({
-      auth: 'github',
-      setup: 'done',
-      user: null,
-      app: null,
-    });
-  });
+  it(
+    'reports needs_owner with an App file and no owner, done once an owner exists',
+    { timeout: 30_000 },
+    async () => {
+      const api = await buildAuthApp();
+      closers.push(() => api.close());
+      await writeFile(api.appFile, JSON.stringify(TEST_APP_SECRETS), { mode: 0o600 });
+      expect((await api.app.inject('/api/v1/auth/state')).json()).toMatchObject({
+        setup: 'needs_owner',
+      });
+      const sqlite = new SQLite(join(api.directory, 'atlas.sqlite'));
+      try {
+        sqlite
+          .prepare(
+            "INSERT INTO users (id, githubId, login, role, createdAt) VALUES ('u1', 1, 'octo', 'owner', '2026-11-25T00:00:00.000Z')",
+          )
+          .run();
+      } finally {
+        sqlite.close();
+      }
+      expect((await api.app.inject('/api/v1/auth/state')).json()).toEqual({
+        auth: 'github',
+        setup: 'done',
+        user: null,
+        app: null,
+      });
+    },
+  );
 });

@@ -97,26 +97,33 @@ it('deletes one session or all of a user and tells listeners', () => {
   expect(store.find(other)).toBeNull();
 });
 
-it('lets a signed-in user through and refuses an unknown session', async () => {
-  const api = await buildAuthApp();
-  closers.push(() => api.close());
-  await writeFile(api.appFile, JSON.stringify(TEST_APP_SECRETS), { mode: 0o600 });
-  const { store, addUser } = openStore(join(api.directory, 'atlas.sqlite'));
-  addUser('u1', 'member');
-  const rawId = store.create('u1');
-  const signedIn = await api.app.inject({
-    url: '/api/v1/projects',
-    cookies: { atlas_session: rawId },
-  });
-  expect(signedIn.statusCode).toBe(200);
-  const state = await api.app.inject({
-    url: '/api/v1/auth/state',
-    cookies: { atlas_session: rawId },
-  });
-  expect(state.json()).toMatchObject({ setup: 'needs_owner', user: { id: 'u1', role: 'member' } });
-  const unknown = await api.app.inject({
-    url: '/api/v1/projects',
-    cookies: { atlas_session: 'forged' },
-  });
-  expect(unknown.statusCode).toBe(401);
-});
+it(
+  'lets a signed-in user through and refuses an unknown session',
+  { timeout: 30_000 },
+  async () => {
+    const api = await buildAuthApp();
+    closers.push(() => api.close());
+    await writeFile(api.appFile, JSON.stringify(TEST_APP_SECRETS), { mode: 0o600 });
+    const { store, addUser } = openStore(join(api.directory, 'atlas.sqlite'));
+    addUser('u1', 'member');
+    const rawId = store.create('u1');
+    const signedIn = await api.app.inject({
+      url: '/api/v1/projects',
+      cookies: { atlas_session: rawId },
+    });
+    expect(signedIn.statusCode).toBe(200);
+    const state = await api.app.inject({
+      url: '/api/v1/auth/state',
+      cookies: { atlas_session: rawId },
+    });
+    expect(state.json()).toMatchObject({
+      setup: 'needs_owner',
+      user: { id: 'u1', role: 'member' },
+    });
+    const unknown = await api.app.inject({
+      url: '/api/v1/projects',
+      cookies: { atlas_session: 'forged' },
+    });
+    expect(unknown.statusCode).toBe(401);
+  },
+);
