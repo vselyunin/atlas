@@ -1,6 +1,7 @@
 # GitHub connection: sign-in and repository access
 
-Status: draft for the user's review, 2026-11-25.
+Status: draft for the user's review, 2026-11-25. Revised the same day after an
+independent review; "Review record" at the end lists what changed.
 
 ## Intent and scope
 
@@ -32,7 +33,8 @@ the next iteration; "What the push iteration needs" lists what it builds on.
 - A Worker never holds a long-lived GitHub credential. It receives a token for
   one repository, valid for at most one hour, only while it runs a command that
   needs it.
-- A sandboxed agent can never read a GitHub credential.
+- An agent running in the Atlas sandbox, in the Worker container, cannot read a
+  GitHub credential.
 - Everything built works unchanged when an installation is later hosted for a
   team.
 
@@ -53,17 +55,20 @@ the next iteration; "What the push iteration needs" lists what it builds on.
 - Changing the `existing` project mode, which records a Git URL and never
   clones it.
 - Git LFS and submodules when cloning.
+- Repositories in more than one GitHub account per installation. See "One
+  account per installation".
 
 ## Anti-goals
 
-- A credential that an agent can read: in its environment, in its worktree, in
-  the project's Git config, or in the Worker state directory.
+- A credential that a sandboxed agent can read: in its environment, in its
+  worktree, in the project's Git config, or in the Worker state directory.
 - A GitHub token written to disk anywhere: the database, the Worker's command
   journal, a Git config or a log.
 - Sign-in that can be switched off without anyone noticing. Running without
   sign-in must be an explicit setting and visible on the Board.
 - Rights wider than needed "for later", other than the pull request right named
   below.
+- An installation whose owner is "whoever came first".
 
 ## Approaches
 
@@ -108,6 +113,8 @@ Other decisions by the user:
   repository, and a repository already on GitHub is cloned into a new project.
   Connecting is built first.
 - Sign-in is remembered per browser; the user is not asked on every visit.
+- An explicit setting turns sign-in off so that existing tests stay unchanged;
+  see "Running without sign-in".
 
 Within an installation every signed-in user sees and can change every project
 and task. This is the author's reading of "personal or team usage", stated to
@@ -129,29 +136,39 @@ Checked against GitHub's documentation on 2026-11-25:
 - Sign-in through a GitHub App uses no scopes. The resulting token can do only
   what both the person and the App may do. Reading the person's own account
   (`GET /user`) is listed under no App right. PKCE (`S256`) and `state` are
-  supported and recommended.
+  supported and recommended. The return address must match a registered
+  callback address exactly, port included.
 - A pull request opened with an installation token is shown as the App's bot.
 - A ruleset that requires pull requests on the default branch does not stop a
   push of another branch such as `atlas/task-<id>`.
+- An App that is not public can be installed only on the account that owns it,
+  and when an organization owns it, only that organization's members can sign
+  in through it. (Reported by the reviewer from the documentation.)
+- After installation GitHub sends the browser only to the App's "Setup URL".
+  The installation ID in that redirect can be forged and must not be trusted.
 
 Not settled by the documentation. The first step of the plan tests these live,
 with the user at the browser, before anything is built on them:
 
 1. Whether the manifest flow accepts `http://localhost` addresses for its
-   redirect and callback URLs. GitHub's own sign-in tutorial uses one; the
-   manifest page shows only `https`.
+   redirect, callback and setup URLs. GitHub's own sign-in tutorial uses one;
+   the manifest page shows only `https`.
 2. Whether an App can be created with webhooks inactive and no webhook URL.
-3. Whether a sign-in callback to `http://localhost:<port>` must match the
-   registered port exactly. Assume it must.
-4. Who can sign in through an App that is not public. The expectation, not
-   verified, is that only the owning account can, or the members of the owning
-   organization. See "Who can be a member".
+   Try a manifest without the webhook section first.
+3. Who can sign in through a non-public App owned by a personal account. The
+   expectation is: only that account.
+4. Whether GitHub lets the API revoke an installation token before it expires
+   (`DELETE /installation/token`, from memory).
+5. Whether a push from an App without the "Workflows" right is rejected when
+   the branch changes files under `.github/workflows` (expected: yes). This one
+   only needs noting for the push iteration.
 
 If 1 fails, the fallback is manual registration: the setup page shows the exact
-values to enter on GitHub, and the owner pastes the App ID, client ID and client
+values to enter on GitHub, and the owner types the App ID, client ID and client
 secret into the setup page and uploads the key file there. If 2 fails, register
 an inactive webhook with a placeholder address; if GitHub demands a reachable
-one, stop and raise it with the user.
+one, stop and raise it with the user. If 4 fails, tokens simply live out their
+hour and the known limit stays.
 
 ## Design
 
@@ -162,18 +179,42 @@ Each installation has one GitHub App. Its settings:
 - Repository rights: Contents read and write, Pull requests read and write,
   Metadata read (GitHub requires it). Pull requests is unused this iteration. It
   is requested now because adding a right later needs the owner to approve it
-  again on GitHub for every place the App is installed.
+  again on GitHub.
+- Not the Workflows right. With it the bot could change a repository's
+  automation, which can read that repository's stored secrets. The cost is
+  recorded under "What the push iteration needs". This is the author's call.
 - No organization or account rights. No events.
 - Webhooks inactive.
-- Not public: only the owning account can install it.
+- Not public.
 - Sign-in callback: `<Board origin>/api/v1/auth/github/callback`.
+- Setup URL, where GitHub returns after installation: a Board address.
 - No "request user authorization during installation".
 
 The Board reaches the API through the Board's own origin (the Vite proxy for
 `/api/v1`), so GitHub's redirects go to the Board origin and cookies are
 same-origin. The addresses come from the existing `ATLAS_BOARD_ORIGIN`. If the
-owner later changes that origin, they update the callback address in the App's
+owner later changes that origin, they update the addresses in the App's
 settings on GitHub; document this.
+
+### One account per installation
+
+Because the App is not public, it can be installed only on the account that
+owns it. So:
+
+- An installation of Atlas works with the repositories of exactly one GitHub
+  account: a person's or an organization's.
+- An App owned by a personal account cannot reach an organization's
+  repositories. To use Atlas on an organization's repositories, the App must be
+  created under that organization, which needs a person allowed to create Apps
+  there.
+- For an organization's App, people who sign in must be members of that
+  organization. For a personal App, the expectation is that only the owner can
+  sign in at all (live check 3), so a personal installation has one user.
+
+The setup page states these before the owner chooses the account. Making the
+App public is not a fallback: anyone on GitHub could then install it, and Atlas
+would have to decide which installations to trust. If a team needs members from
+outside its organization, raise it with the user. This is the author's call.
 
 ### Where the App's secrets live
 
@@ -186,46 +227,71 @@ new API setting names the file. This is the author's call, for these reasons:
   directory, so the file is not visible inside the container at all.
 - Keeping it out of SQLite keeps it out of database copies and test databases.
 
-The file must not be inside a workspace root or a Worker state directory;
-document this next to the setting. The API never returns any of these values
-and never logs them.
+The file must not be inside a workspace root or a Worker state directory. The
+API refuses to start, and refuses to grant a credential, when the file's path
+lies under the workspace root of any registered Worker. The API never returns
+any of these values and never logs them.
+
+`scripts/dev.mjs` must resolve the file's path from the repository root, as it
+already does for the database path; the API package runs with its own folder as
+working directory.
 
 Removing the connection is manual this iteration: stop Atlas, delete the file,
 start again. Users and project links stay in the database, and setup runs
-again. The existing owner stays the owner: "first sign-in becomes the owner"
-applies only while the database has no owner. Links survive because Atlas asks
-GitHub at each use which installation of the current App covers the linked
-repository; see "Linking a project to a repository". This is the author's call.
+again, under the rule in "Setup" that an existing owner must be signed in.
+Links survive because Atlas asks GitHub at each use which installation of the
+current App covers the linked repository. This is the author's call.
 
 ### Setup
 
 While no App file exists, the installation is "not set up". In that state the
-API serves only the sign-in state endpoint and the setup endpoints, and the
-Board shows a setup page in place of everything else.
+Board shows a setup page in place of everything else, and the API serves only:
+the sign-in state endpoint, the setup endpoints, and the Worker socket, which
+has its own token check and is independent of sign-in.
 
-1. The owner optionally names an organization that should own the App;
-   otherwise their personal account owns it. The Board asks the API for the
-   manifest and a one-time `state` value, and posts them to GitHub in a form.
+1. The owner reads the "one account" rules, optionally names an organization
+   that should own the App, and starts setup. The API creates a one-time
+   `state` value that expires after one hour, remembers it, and also binds it
+   to this browser with an `HttpOnly` cookie. The Board posts the manifest and
+   `state` to GitHub in a form.
 2. On GitHub the owner confirms the App's name and creates it. App names are
    unique across GitHub, so the manifest proposes `Atlas` plus a short random
    suffix and the owner can change it there.
 3. GitHub returns to `<Board origin>/api/v1/setup/github/callback` with a code.
-   The API checks `state`, exchanges the code, writes the App file, and marks
-   this browser, with a short-lived cookie, as the one that completed setup.
-4. The API sends the browser to GitHub's page for installing the App, where the
-   owner picks the account and the repositories. GitHub then returns to the
-   Board.
-5. The owner signs in. The first sign-in from the browser marked in step 3
-   becomes the owner of the installation. If that mark has expired, the first
-   sign-in after setup becomes the owner.
+   The API accepts it only with a `state` that it issued, that is unused and
+   unexpired, and that matches this browser's cookie. It exchanges the code,
+   then asks GitHub, using the new key, what App this is, and checks that the
+   App is not public and has exactly the rights the manifest asked for. If any
+   check fails it stores nothing and says why.
+4. The API writes the App file and gives this browser a setup mark: a random
+   secret in an `HttpOnly` cookie, whose hash the API keeps. The Board shows
+   the App's name and owning account and a button to continue.
+5. The browser goes to GitHub's page for installing the App, where the owner
+   picks the repositories. GitHub returns to the Setup URL on the Board.
+6. The owner signs in. A sign-in becomes the owner only if the database has no
+   owner and the browser carries the setup mark. The mark does not expire by
+   time; it ends when an owner exists.
 
-Setup endpoints refuse to act once the App file exists. Setup is open to
-whoever can reach the API, which today means a process on the same machine,
-because the API listens on loopback only. A hosted installation needs a one-time
-setup code; that belongs to the hosting work.
+If the setup mark is lost, for example the owner finishes in another browser,
+nobody becomes owner by signing in. While the installation is set up but has no
+owner, the API writes a one-time owner code to its own output at start, and the
+sign-in page accepts it in place of the mark. There is no "first sign-in wins".
+
+If the database already has an owner, every setup endpoint requires that
+owner's session. Sessions do not depend on the App file, so the owner stays
+signed in across removal and can run setup again; nobody else can.
+
+Setup of a fresh installation is open to whoever can reach the API, which today
+means a process on the same machine, because the API listens on loopback only.
+A hosted installation needs a setup code from the start; that belongs to the
+hosting work.
 
 Atlas learns where the App is installed by asking GitHub with the App's own
-key, not from values in a redirect.
+key, never from values in a redirect.
+
+Existing installations: with the default `ATLAS_AUTH=github`, the first
+`pnpm dev` or `pnpm dev:web` after this change shows only the setup page until
+the owner has created the App. This is intended; say so in the setup guide.
 
 ### Sign-in
 
@@ -237,19 +303,22 @@ key, not from values in a redirect.
 3. The API keeps the numeric account ID, login, display name and avatar
    address, then discards the GitHub token. It is never stored. The builder may
    also revoke it at GitHub.
-4. If the account may sign in, the API creates a session and redirects to the
-   Board. Otherwise the Board shows that this account has no access and names
-   the account, so a person signed in to the wrong GitHub account can tell.
+4. If the account may sign in, the API creates a new session and redirects to
+   the Board. Otherwise the Board shows that this account has no access and
+   names the account, so a person signed in to the wrong GitHub account can
+   tell.
 
 Sessions:
 
-- A random session ID in a cookie that is `HttpOnly`, `SameSite=Lax`, and
-  `Secure` when the Board origin is `https`. The database stores only a hash of
-  the ID.
+- A random session ID, created at sign-in and never taken from the request, in
+  a cookie that is `HttpOnly`, `SameSite=Lax`, and `Secure` when the Board
+  origin is `https`. The database stores only a hash of the ID.
 - A session lasts 30 days from its last use. The stored last-use time need not
   be updated on every request.
-- Signing out deletes the session. Removing a member deletes all their
-  sessions.
+- Signing out is a `POST` and deletes the session. Removing a member deletes
+  all their sessions.
+- No route that changes anything is a `GET`, apart from the two GitHub
+  callbacks, which are protected by `state`.
 
 Who may sign in:
 
@@ -260,29 +329,25 @@ Who may sign in:
 - Membership is checked on every request, so removal takes effect at once.
 
 Roles: `owner` and `member`. The only difference is that the owner manages
-members. There is exactly one owner; transferring ownership is not built.
+members and can run setup again. There is exactly one owner; transferring
+ownership is not built.
 
-Who can be a member. The App stays not public, so that no stranger can install
-it and Atlas never has to decide which installations to trust. If live check 4
-shows that GitHub lets only the owning account or organization through a
-non-public App's sign-in, then a team installation must create its App under the
-team's organization, and members must belong to that organization. The setup
-page and the member page say so. A personal installation is unaffected. Making
-the App public is not a fallback; if a team needs members from outside its
-organization, raise it with the user. This is the author's call.
+The server logs requests. The two callback addresses carry a code and `state`
+in their query string, so their query strings must be kept out of the log.
 
 ### What the API protects
 
 Every `/api/v1` route requires a session, except:
 
 - the sign-in state endpoint, the sign-in start and callback, and sign-out;
-- the setup endpoints, only while the installation is not set up;
+- the setup endpoints, under the rules in "Setup";
 - the Worker socket, which keeps its own token check.
 
 The existing checks on `Host`, `Origin` and JSON content type stay. The Board
-session socket checks the session cookie at upgrade in addition to `Origin`.
-When a user's sessions are deleted, their open Board session sockets are
-closed.
+session socket checks the session cookie at upgrade in addition to `Origin`,
+and checks again at a regular interval while it is open, so a socket does not
+outlive its session. When a user's sessions are deleted, their open Board
+session sockets are closed at once.
 
 A new endpoint, open to everyone, tells the Board which page to show: whether
 sign-in is on, whether setup is done, and who is signed in.
@@ -292,7 +357,8 @@ columns are not exposed through the shared contracts this iteration.
 
 ### Running without sign-in
 
-A new API setting, `ATLAS_AUTH`, takes `github` (the default) or `off`.
+A new API setting, `ATLAS_AUTH`, takes `github` (the default) or `off`. Any
+other value, including an empty one, stops the server at start.
 
 - `off` makes the API behave as it does today: no sign-in, no setup, and no
   GitHub features. The Board shows a permanent notice that sign-in is off.
@@ -308,10 +374,9 @@ signing in, unchanged. It follows the precedent of `ATLAS_AGENT_SANDBOX=off`.
 
 Any signed-in user can link a ready `local` project to a repository.
 
-- The Board shows the accounts where the App is installed and, for one account,
-  the repositories the App can access there, with a link to GitHub's page for
-  changing that selection. The API reads both from GitHub with the App's own
-  credentials.
+- The Board shows the repositories the App can access, with a link to GitHub's
+  page for changing that selection. The API reads them from GitHub with the
+  App's own credentials. There is one account, so there is no account picker.
 - Linking stores the repository's numeric ID, its `owner/name` and its default
   branch. The API first confirms with GitHub that the repository is among those
   the App can access. The installation is not stored as a fact: whenever Atlas
@@ -338,19 +403,48 @@ Linking does not check that the repository's history matches the project's. See
 Creating a project gains a third choice beside "new local repository" and
 "existing Git URL": pick a repository the App can access.
 
-- The project is stored as a `local` project, with a Worker and a relative
-  path, plus a link as above. Sessions therefore work on it with no change to
-  the session code.
+- In the create request this is the `local` form with one added optional field
+  naming the repository's numeric ID. The project is stored as a `local`
+  project, with a Worker and a relative path, plus a link as above, so the
+  session hub's check for a local checkout passes unchanged.
 - The API dispatches a new command kind, `repository.clone`, carrying the
   project ID, the relative path and the repository's `owner/name`. It carries
   no credential.
 - A Worker that can clone registers a new capability. The API refuses to create
   such a project on a Worker without it.
 - The Worker clones over HTTPS into a folder that must not exist, with the same
-  path confinement and journal stages as `repository.init`. It does not fetch
-  submodules. A clone interrupted partway is reported as `needs_attention`, as
-  an interrupted init is today.
+  path rules as `repository.init`. It does not fetch submodules or LFS content.
 - The resulting `origin` address contains no credential.
+
+Recovery is not the same as for init. Today a recovered init is reported as
+succeeded when the folder is the one the Worker made and Git sees a repository
+there (`apps/worker/src/repositories/initialize.ts`). A clone that was killed
+partway would pass that test. So a clone gets its own journal stage, written
+only after every Git step of the clone has exited successfully, and a recovered
+clone that has not reached that stage is reported as `needs_attention`. The
+journal's entry shape must accept both command kinds, and journal files written
+before this change must still be readable.
+
+A clone can take minutes, and the Worker runs commands one at a time and waits
+for them when it stops. A clone must not hold up shutdown: when the Worker
+stops, it ends the Git process, and the command is `needs_attention` on the
+next start. `pnpm dev` stops the container after ten seconds.
+
+Creating a session's worktree has a 30-second limit today. The builder checks
+that limit against a real repository on the user's workspace, which is on a
+Windows drive, and raises it if needed.
+
+### Project paths
+
+Found in review, and true today for `repository.init`: nothing rejects a
+project path inside `.atlas-worktrees`, the folder that holds task worktrees.
+A project created inside a task's worktree would have a Git folder an agent can
+write, and the Worker later runs Git there outside any sandbox.
+
+The API and the Worker both reject a project path whose first part starts with
+a dot, for init and for clone. Existing projects are not affected unless one
+already has such a path; if an existing test depends on such a path, stop and
+ask the user.
 
 ### How a Worker receives a credential
 
@@ -361,36 +455,79 @@ for separately, at the moment it is needed:
 
 - When the Worker is about to run Git for a command that needs GitHub, it sends
   a credential request naming the command ID.
-- The API grants it only if that command exists, is assigned to this Worker, is
-  not finished, and is of a kind that needs a credential. It then asks GitHub
-  for a token limited to that project's linked repository and to the rights
-  that kind needs: Contents read for a clone.
-- The API answers with the token and its expiry, or with a refusal that has a
-  code and a message. A refusal fails the command with that message.
-- Neither side stores the token or logs the message that carries it. The Worker
-  keeps it in memory for the one Git process.
+- The API grants it only if that command exists, is not finished, is of a kind
+  that needs a credential, and was dispatched on this same connection. Worker
+  identity alone is not enough, because all Workers share one token today.
+- The API gives one grant per dispatch of a command, and none later than a
+  fixed time after that dispatch. A command dispatched again after a reconnect
+  can be granted again.
+- The API asks GitHub for a token limited to that project's linked repository
+  and to the rights the command kind needs: Contents read for a clone.
+- The API answers with the token, its expiry and the repository's current
+  `owner/name`, or with a refusal that has a code and a message. A refusal
+  fails the command with that message. If the name differs from the one in the
+  command, because the repository was renamed or moved, the Worker fails the
+  command and does not clone.
+- The API writes a log line for every grant and refusal: command, Worker,
+  repository and rights, never the token.
+- When the command's result arrives, or the time limit passes, the API asks
+  GitHub to revoke the token, if live check 4 shows that is possible. For that
+  it keeps the token in memory until then.
+- Neither side writes the token to disk or logs the message that carries it.
 
-The Worker gives Git the token without putting it in the command line, in any
-Git config file, or in the remote's address: for example through a credential
-helper that reads it from the environment of that one Git process. Other
-credential helpers and terminal prompts are turned off for that process, and
-only HTTPS is allowed as a transport.
+This is the first request and reply on the Worker socket. The reply names the
+command ID. If no reply comes within a time limit, or the connection drops
+while the Worker waits, the Worker ends the command as `needs_attention`
+without having run Git.
+
+How the Worker runs Git with the token:
+
+- The token is not in the command line, in any Git config file, or in the
+  remote's address. It is given through a credential helper that reads it from
+  the environment of that one Git process and answers only for the configured
+  Git host.
+- That process fetches only. It is started so that it does not check out files,
+  follow redirects, fetch submodules, run LFS, or read the user-level Git
+  config; other credential helpers and terminal prompts are off; only HTTPS is
+  allowed. Checking out the files is a second Git process that does not have
+  the token.
+- Every Git process the Worker starts for a command gets an environment without
+  `ATLAS_*` variables, as the session code already does. Today `git init` is
+  started with the Worker's full environment, including the Worker token; fix
+  that as part of this work.
 
 The Worker builds the repository address from a Worker setting for the Git
 host, by default `https://github.com`. Plain `http` is accepted only when that
 host is a loopback address, which is what the tests' stand-in uses; with any
-other `http` address the Worker refuses to start. This is the author's call.
+other `http` address the Worker refuses to start. The setting's name starts
+with `ATLAS_`, so agents do not inherit it, and `scripts/worker-container.mjs`
+must pass it to the container. This is the author's call.
 
-Why an agent cannot get it: the Worker runs this Git process itself, outside
-any agent sandbox. An agent has its own process view, so it cannot read another
-process's environment; it cannot read the Worker state directory; and its
-network filter does not allow GitHub's hosts.
+Why a sandboxed agent cannot get the token: the Worker runs these Git processes
+itself, outside any agent sandbox. An agent in the sandbox has its own process
+view, so it cannot read another process's environment; it cannot read the
+Worker state directory; and by default its network filter does not allow
+GitHub's hosts. See "Known limits" for when this does not hold.
 
-These are new Worker protocol messages and a new command kind, so they follow
-the repository's contract-change rules: document them in
+### Changes to shared contracts and existing code
+
+These follow the repository's contract-change rules: document them in
 `docs/development/protocol.md`, update validators and fixtures together with
-both consumers, and say how an older Worker behaves. An older Worker never
-receives a clone command because it lacks the capability.
+both consumers, and check both directions of old and new.
+
+- A second command kind. The message union is keyed on `type`, and both kinds
+  have the type `command.dispatch`, so the dispatch message must become one
+  message whose payload is a union on `kind`. The exported init command schema
+  is used by the Worker and its journal.
+- The API's dispatch code sends `repository.init` for every pending operation,
+  and the operations table records no kind. The table needs a kind. Do not add
+  it to the operation shape returned over HTTP.
+- A new capability. The accepted capability lists are exact, so an older API
+  refuses a newer Worker's registration outright, and a newer API accepts an
+  older Worker and simply never sends it a clone. Document both.
+- The credential request, grant and refusal messages.
+- The optional repository field in the project create request.
+- The new HTTP endpoints for sign-in, setup, members, repositories and links.
 
 ### What the push iteration needs
 
@@ -412,15 +549,25 @@ It must settle:
   between unrelated branches.
 - A push that outlasts one hour, and a token that expires mid-push.
 - Rulesets that restrict creating branches named `atlas/*`.
+- A task branch that changes files under `.github/workflows`: without the
+  Workflows right the push is expected to be rejected.
+- What leaves the machine. An agent can read every project's checkout on its
+  Worker. Once branches are pushed, content in one repository could lead an
+  agent to copy another project's files into its branch, and the push would
+  publish them. Decide between a review before pushing and limiting what an
+  agent can read.
 
 ## The Board
 
-- Setup page, shown while the installation is not set up.
+- Setup page, shown while the installation is not set up, including the "one
+  account" rules, the confirmation of the created App, and the owner code
+  field.
 - Sign-in page with one button, and the "this account has no access" state.
 - The signed-in user's name and avatar with a sign-out action.
-- Settings: the GitHub connection (App name, where it is installed, a link to
-  manage it on GitHub) and, for the owner, the member list.
-- On a project: its linked repository, with link and unlink actions.
+- Settings: the GitHub connection (App name, owning account, a link to manage
+  it on GitHub) and, for the owner, the member list.
+- On a project: its linked repository, with link and unlink actions, and the
+  "not accessible" state.
 - In project creation: the choice to clone from GitHub.
 - The "sign-in is off" notice.
 
@@ -453,32 +600,42 @@ be refused, apart from the listed exceptions. It reads the routes from the
 running API, so a route added later is covered without anyone remembering to
 add it.
 
-If the new capability or command kind makes an existing contract test fail, for
-example one that lists the accepted capability sets, stop and ask the user,
+The reviewer found that a third accepted capability list does not break the
+existing contract tests. If any existing test does fail because of the changes
+under "Changes to shared contracts and existing code", stop and ask the user,
 naming the file, the exact change and the reason.
 
 New tests use a stand-in for GitHub: a local HTTP server the API is pointed at
 through its configurable GitHub addresses. No test talks to github.com.
 
-- Contracts: the new messages, the command kind, the capability, and the new
+- Contracts: the new messages, the command kinds, the capability, and the new
   HTTP shapes.
 - API sign-in: `state` and PKCE checked; a wrong or reused `state` refused; the
-  GitHub token not stored; session cookie attributes; expiry and renewal;
-  sign-out; a member bound to an ID is refused under another ID; removal ends
-  sessions and closes sockets; every protected route and the Board session
+  GitHub token not stored; a fresh session ID at every sign-in; session cookie
+  attributes; expiry and renewal; sign-out; a member bound to an ID is refused
+  under another ID; removal ends sessions and closes sockets; an open socket
+  closes after its session expires; every protected route and the Board session
   socket refuse a request without a session; the Worker socket still works with
-  its token and no session.
-- API setup: endpoints refuse once set up; the App file is written with mode
-  `0600`; no secret appears in any response or log line; the first sign-in
-  becomes owner.
+  its token and no session; an unknown `ATLAS_AUTH` value stops the server.
+- API setup: a callback refused without the browser's cookie, with a reused or
+  expired `state`, and for an App that is public or has other rights; endpoints
+  refuse a non-owner once an owner exists; the App file is written with mode
+  `0600`; no secret, code or `state` appears in any response or log line; a
+  sign-in without the setup mark or owner code does not become owner.
 - API GitHub access: listing; linking refused for a repository the App cannot
-  access; a credential granted only for the right Worker, command state and
-  kind; the token request sent to GitHub names one repository and the narrow
-  right.
+  access; a credential granted only on the dispatching connection, for an
+  unfinished command of the right kind, once per dispatch and within the time
+  limit; the token request sent to GitHub names one repository and the narrow
+  right; revocation on result.
 - Worker: a clone from a local stand-in Git server over HTTP using the
   credential exchange; the token absent from the journal, the Git config, the
-  remote address and the process arguments; refusal fails the command;
-  interrupted clone reported as `needs_attention`.
+  remote address and the process arguments, and absent from the environment of
+  the checkout process; a renamed repository refused; refusal and a missing
+  reply end the command; a clone killed partway is `needs_attention` on
+  recovery and never succeeded; a journal file from before this change still
+  reads; a project path starting with a dot refused.
+- Docker group: a stand-in agent inside the sandbox cannot read the environment
+  of the Worker or of another process the Worker started.
 - Board: the page shown for each state, the member list, linking, and the clone
   choice.
 - Integration: API and Worker together, sign-in through the stand-in, create a
@@ -491,11 +648,13 @@ repository, and confirm on GitHub that the App has only the expected rights.
 
 ## Documentation
 
-- `docs/development/local-setup.md`: first-run setup, sign-in, the new
+- `docs/development/local-setup.md`: first-run setup and what an existing
+  installation sees after upgrading, sign-in, the "one account" rules, the new
   settings, where the App file lives and what must not be done with it, how to
   remove the connection, and the limits below.
 - `docs/development/protocol.md`: the new HTTP endpoints, the sign-in
-  requirement, the credential messages, the clone command and the capability.
+  requirement, the credential messages, the clone command, the capability and
+  how old and new Workers and APIs behave together.
 - `AGENTS.md` and `.env.example`: the new settings.
 
 ## Known limits
@@ -506,20 +665,73 @@ repository, and confirm on GitHub that the App has only the expected rights.
   account.
 - Anyone who can run a process on the machine can reach the API on loopback.
   Sign-in stops them using it; it does not stop them reading `.atlas/`.
-- Setup is open to whoever reaches the API first.
-- A token handed to a Worker is valid for up to one hour for one repository,
-  even though it is needed for seconds.
+- Setup of a fresh installation is open to whoever reaches the API first.
+- The promise that an agent cannot read a credential holds only for an agent in
+  the Atlas sandbox inside the Worker container. With `ATLAS_AGENT_SANDBOX=off`
+  or a Worker run natively, the agent runs as the Worker's own account: it can
+  read the environment of the Worker's Git processes and the Worker token, and
+  on a native Worker the App file itself, which reaches every repository the
+  App can. Atlas does not refuse GitHub commands in that state; the existing
+  warning about running unsandboxed applies in full. This is the author's call.
+- GitHub's hosts are blocked for agents only by default. An owner who adds them
+  to `ATLAS_AGENT_ALLOWED_DOMAINS` removes that layer.
+- All Workers share one token, and a Worker names itself. Whoever holds that
+  token can register under the name of a Worker that is offline and receive its
+  commands, and so its credentials. A token per Worker belongs to the hosting
+  work.
+- If GitHub does not allow early revocation, a token handed to a Worker stays
+  valid for up to one hour for one repository.
+- A cloned repository brings its own agent instructions and settings, and the
+  agent runs with its permission prompts off. Together with agents being able
+  to read other projects' checkouts, a hostile repository could steer an agent
+  to read another project. Nothing leaves the machine through Atlas until the
+  push iteration, which must settle this.
+- The browser sends a `localhost` cookie to every port on localhost, so another
+  local web service receives the session cookie and can overwrite it.
 - Every signed-in user sees every project and every repository name the App can
   access.
-- A session socket that is already open stays open when its session merely
-  expires; it is closed on sign-out and on removal.
+- The Worker image uses Git from Debian bookworm, and the user's workspace is
+  on a case-insensitive Windows drive, a setting several past Git clone flaws
+  needed. The builder checks the image's Git version against known clone flaws
+  and moves to a newer Git if it is affected.
 
 ## Left to the builder
 
 - Database tables, endpoint paths and payload shapes beyond those named, and
   setting names other than `ATLAS_AUTH`.
-- Whether to add a cookie or JWT library or use Node's own `crypto`.
-- How the Worker passes the token to Git, within the rules above.
-- Clone timeouts and how progress is shown.
+- Whether to add a cookie or JWT library or use Node's own `crypto`, and
+  whether the session cookie can use the `__Host-` name prefix.
+- The exact Git options that meet the rules in "How a Worker receives a
+  credential".
+- The time limits named without a number, and how clone progress is shown.
 - Board layout and wording.
 - How the stand-in GitHub and the stand-in Git server are built for tests.
+
+## Review record
+
+An independent reviewer, given this document, the user's requirements and the
+code but not the design conversation, reviewed the first draft on 2026-11-25.
+Its findings were checked against the code before being accepted. Changed as a
+result:
+
+- Setup: `state` bound to the browser and single-use; the created App is
+  verified with GitHub before it is stored; an existing owner must be signed in
+  to run setup again.
+- Owner: "first sign-in becomes the owner" removed; a setup mark or a one-time
+  owner code is required.
+- The Setup URL, without which GitHub does not return to the Board.
+- Clone recovery: the draft wrongly said an interrupted init is reported as
+  `needs_attention`. It is reported as succeeded, so a clone needs its own
+  stage.
+- Credential: fetch and checkout separated; grants bound to the connection,
+  limited to one per dispatch and in time, logged, and revoked where possible.
+- Project paths starting with a dot refused.
+- One account per installation, and the account picker removed.
+- The Workflows right decided: not requested.
+- The contract and code changes the draft did not name.
+- Known limits added: unsandboxed and native Workers, the shared Worker token,
+  hostile repositories, cookies across ports, the image's Git version.
+
+Not taken: the reviewer suggested cutting members and roles from the first
+iteration. They stay, because users of an installation are the reason the user
+gave for sign-in.
