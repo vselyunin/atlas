@@ -61,6 +61,10 @@ export type StandInState = {
   // Codes accepted once by the manifest conversion.
   manifestCodes: string[];
   failWith: null | 500 | 403 | 'hang';
+  // The App owner's account type, as GitHub reports it on `GET /app`.
+  appOwnerType?: 'User' | 'Organization';
+  // Fails only the matching requests with this status; others are answered normally.
+  failWhen?: (request: StandInRequest) => 500 | null;
   requests: StandInRequest[];
   // Tokens the stand-in has issued and not yet revoked.
   userTokens: Map<string, string>;
@@ -320,7 +324,10 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
         id: secrets.appId,
         slug: secrets.slug,
         name: secrets.name,
-        owner: { login: secrets.account },
+        owner: {
+          login: secrets.account,
+          ...(state.appOwnerType ? { type: state.appOwnerType } : {}),
+        },
         permissions: state.appPermissions,
         events: state.appEvents,
       });
@@ -482,8 +489,11 @@ export async function startGithubStandIn(): Promise<GithubStandIn> {
       }
       const method = request.method ?? 'GET';
       const authorization = request.headers.authorization ?? null;
-      state.requests.push({ method, path: url.pathname, body, authorization });
+      const recorded = { method, path: url.pathname, body, authorization };
+      state.requests.push(recorded);
 
+      const failure = state.failWhen?.(recorded) ?? null;
+      if (failure !== null) return send(response, failure, { message: 'Server Error' });
       if (state.failWith === 'hang') return;
       if (state.failWith === 500) return send(response, 500, { message: 'Server Error' });
       if (state.failWith === 403) {

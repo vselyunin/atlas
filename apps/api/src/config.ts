@@ -39,6 +39,8 @@ export interface AuthOptions {
 export interface ApiOptions extends z.infer<typeof optionsSchema> {
   now?: () => Date;
   logger?: boolean;
+  // Sends the log to this stream instead of standard output, and turns the log on.
+  logStream?: { write(line: string): void };
   auth?: AuthOptions;
 }
 
@@ -51,8 +53,13 @@ function resolveAuth(auth: AuthOptions | undefined): ResolvedAuthOptions | undef
     appFile: parsed.appFile,
     githubApiUrl: parsed.githubApiUrl ?? 'https://api.github.com',
     githubWebUrl: parsed.githubWebUrl ?? 'https://github.com',
+    // The person running the API reads the code from its output; it never goes through the log.
     ownerCodeSink:
-      auth.ownerCodeSink ?? ((code) => process.stdout.write(`Atlas owner code: ${code}\n`)),
+      auth.ownerCodeSink ??
+      ((code) =>
+        process.stdout.write(
+          `Atlas owner code (enter it on the sign-in page to become the owner): ${code}\n`,
+        )),
   };
 }
 
@@ -62,6 +69,7 @@ export function validateOptions(options: ApiOptions) {
     ...parsed,
     now: () => (options.now?.() ?? new Date()).toISOString(),
     logger: options.logger ?? false,
+    logStream: options.logStream,
     auth: resolveAuth(options.auth),
   };
 }

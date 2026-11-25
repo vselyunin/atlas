@@ -1,10 +1,9 @@
-import { existsSync } from 'node:fs';
 import type { User } from '@atlas/contracts';
 import { eq } from 'drizzle-orm';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { ResolvedAuthOptions } from '../config.js';
 import type { ApiContext } from '../db/client.js';
 import { users } from '../db/schema.js';
+import type { AppFile } from '../github/app-file.js';
 import { ApiError } from '../http/errors.js';
 import { SESSION_COOKIE } from './sessions.js';
 import type { SessionStore } from './sessions.js';
@@ -48,8 +47,9 @@ export function hasOwner({ db }: ApiContext) {
   return db.select({ id: users.id }).from(users).where(eq(users.role, 'owner')).get() !== undefined;
 }
 
-export function appFileExists(auth: ResolvedAuthOptions) {
-  return existsSync(auth.appFile);
+// Reads the App file: an unreadable or invalid file is an error, never "not set up".
+export function appFileExists(appFile: AppFile) {
+  return appFile.read() !== null;
 }
 
 export function readSessionUser(request: FastifyRequest, sessions: SessionStore) {
@@ -69,10 +69,10 @@ export function registerAccess(
   app: FastifyInstance,
   context: ApiContext,
   sessions: SessionStore,
-  auth: ResolvedAuthOptions | undefined,
+  appFile: AppFile | undefined,
 ) {
   app.decorateRequest('user', null);
-  if (!auth) return;
+  if (!appFile) return;
   app.addHook('onRequest', (request, _reply, done) => {
     const access = request.routeOptions.config.access;
     if (access === 'public' || access === 'worker') return done();
@@ -80,7 +80,7 @@ export function registerAccess(
       request.user = readSessionUser(request, sessions);
       if (access === 'setup')
         return done(hasOwner(context) ? requireOwner(request.user) : undefined);
-      if (!appFileExists(auth))
+      if (!appFileExists(appFile))
         return done(new ApiError(409, 'setup_required', 'Atlas is not set up yet'));
       if (!request.user) return done(new ApiError(401, 'sign_in_required', 'Sign in to continue'));
       if (access === 'owner') return done(requireOwner(request.user));

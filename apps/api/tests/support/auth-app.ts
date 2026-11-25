@@ -19,14 +19,25 @@ export const TEST_APP_SECRETS = {
   privateKey: '-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----\n',
 };
 
+export type AuthAppExtras = {
+  // Points the API at a GitHub stand-in.
+  github?: { apiUrl: string; webUrl: string };
+  // Runs before the API is built, for example to write the App file or seed the database.
+  prepare?: (paths: { directory: string; appFile: string; dbPath: string }) => unknown;
+};
+
 // Builds the API with sign-in on, a database and an App file path in a temporary directory.
 // The App file is not created; tests that need setup done write it themselves.
-export async function buildAuthApp(overrides: Partial<ApiOptions> = {}) {
+export async function buildAuthApp(
+  overrides: Partial<ApiOptions> = {},
+  extras: AuthAppExtras = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), 'atlas-auth-'));
   const appFile = join(directory, 'github-app.json');
   const ownerCodes: string[] = [];
   let app: FastifyInstance;
   try {
+    await extras.prepare?.({ directory, appFile, dbPath: join(directory, 'atlas.sqlite') });
     app = await buildApp({
       dbPath: join(directory, 'atlas.sqlite'),
       workerToken: WORKER_TOKEN,
@@ -35,6 +46,9 @@ export async function buildAuthApp(overrides: Partial<ApiOptions> = {}) {
       auth: {
         appFile,
         ownerCodeSink: (code) => ownerCodes.push(code),
+        ...(extras.github
+          ? { githubApiUrl: extras.github.apiUrl, githubWebUrl: extras.github.webUrl }
+          : {}),
         ...overrides.auth,
       },
     });

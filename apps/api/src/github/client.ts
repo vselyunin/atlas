@@ -57,6 +57,12 @@ const AppSchema = z.object({
   events: z.array(z.string()),
 });
 
+const AppOwnerSchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  owner: AccountSchema.extend({ type: z.string().optional() }),
+});
+
 const AccessTokenSchema = z.union([
   z.object({ access_token: z.string().min(1) }),
   z.object({ error: z.string() }),
@@ -166,6 +172,28 @@ export class GitHubClient {
       public: lookup.status === 200,
       permissions: app.permissions,
       events: app.events,
+    };
+  }
+
+  // The App as GitHub now reports it: the owner may have renamed it since setup.
+  async readApp(secrets: AppSecrets): Promise<{
+    slug: string;
+    name: string;
+    account: string;
+    accountType: 'User' | 'Organization';
+  }> {
+    const operation = 'read the App';
+    const { body } = await this.request({
+      operation,
+      url: this.api('/app'),
+      authorization: this.jwt(secrets),
+    });
+    const app = parse(operation, AppOwnerSchema, body);
+    return {
+      slug: app.slug,
+      name: app.name,
+      account: app.owner.login,
+      accountType: app.owner.type === 'Organization' ? 'Organization' : 'User',
     };
   }
 

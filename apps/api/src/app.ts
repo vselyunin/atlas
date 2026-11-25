@@ -10,11 +10,17 @@ import { SessionStore } from './auth/sessions.js';
 import type { ApiOptions } from './config.js';
 import { isLocalHost, validateOptions } from './config.js';
 import { openDatabase } from './db/client.js';
+import { AppFile } from './github/app-file.js';
+import { GitHubClient } from './github/client.js';
+import { registerGithubRoutes } from './github/routes.js';
 import { ApiError, registerErrorHandlers } from './http/errors.js';
+import { loggerOptions } from './http/log.js';
 import { registerOperationRoutes } from './operations/routes.js';
 import { registerProjectRoutes } from './projects/routes.js';
 import { SessionHub } from './sessions/hub.js';
 import { registerSessionRoutes } from './sessions/routes.js';
+import { registerSetupRoutes } from './setup/routes.js';
+import { SetupService, assertAppFileOutsideWorkspaces } from './setup/service.js';
 import { registerTaskRoutes } from './tasks/routes.js';
 import { registerVersionRoutes } from './versions/routes.js';
 import { registerGateway } from './workers/gateway.js';
@@ -24,11 +30,12 @@ import { registerWorkerRoutes } from './workers/routes.js';
 export type { ApiOptions, AuthOptions } from './config.js';
 
 export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
-  const { dbPath, workerToken, allowedOrigin, now, logger, auth } = validateOptions(options);
+  const { dbPath, workerToken, allowedOrigin, now, logger, logStream, auth } =
+    validateOptions(options);
   const database = openDatabase(dbPath, now);
   const context = { db: database.db, now };
   const registry = new WorkerRegistry(context);
-  const app = Fastify({ logger });
+  const app = Fastify({ logger: loggerOptions(logger, logStream) });
   app.addHook('onClose', (_app, done) => {
     database.close();
     done();
@@ -52,8 +59,27 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
   });
   trackRoutes(app);
   const authSessions = new SessionStore(context);
+  const appFile = auth ? new AppFile(auth.appFile) : undefined;
+  const github = auth
+    ? new GitHubClient({ apiUrl: auth.githubApiUrl, webUrl: auth.githubWebUrl })
+    : undefined;
+  const setup =
+    appFile && github && auth
+      ? new SetupService({
+          context,
+          appFile,
+          github,
+          boardOrigin: allowedOrigin,
+          webUrl: auth.githubWebUrl,
+        })
+      : undefined;
 
   try {
+    if (appFile) {
+      assertAppFileOutsideWorkspaces(context, appFile);
+      // Throws with the file's path when the file exists but is not a valid App file.
+      appFile.read();
+    }
     await app.register(cors, {
       origin: allowedOrigin,
       methods: ['GET', 'POST', 'PATCH'],
@@ -72,8 +98,12 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
         this.websocketServer.close(done);
       },
     });
-    registerAccess(app, context, authSessions, auth);
-    registerAuthRoutes(app, context, authSessions, auth);
+    registerAccess(app, context, authSessions, appFile);
+    registerAuthRoutes(app, context, authSessions, auth, appFile);
+    if (setup && appFile && github && auth) {
+      registerSetupRoutes(app, setup, allowedOrigin);
+      registerGithubRoutes(app, appFile, github, auth.githubWebUrl);
+    }
     registerProjectRoutes(app, context, registry);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);
@@ -95,6 +125,9 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
       done(null, payload);
     });
     await app.ready();
+    // Shown to the person running the API, never through the request log.
+    const ownerCode = setup?.openOwnerCode();
+    if (ownerCode && auth) auth.ownerCodeSink(ownerCode);
     return app;
   } catch (error) {
     await app.close();
