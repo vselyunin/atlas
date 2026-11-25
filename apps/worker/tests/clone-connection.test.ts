@@ -169,6 +169,35 @@ it('stops promptly while a clone waits, reporting needs attention', async () => 
   });
 });
 
+it('does not start a clone still queued when the Worker stops', async () => {
+  const first = makeRepositoryCloneCommandFixture({ commandId: randomUUID() });
+  const second = makeRepositoryCloneCommandFixture({
+    commandId: randomUUID(),
+    payload: { ...first.payload, relativePath: 'second' },
+  });
+  let asked: () => void = () => {};
+  const requested = new Promise<void>((resolve) => (asked = resolve));
+  onMessage = (socket, message) => {
+    if (message.type === 'worker.register') {
+      socket.send(JSON.stringify(first));
+      socket.send(JSON.stringify(second));
+    }
+    if (message.type === 'credential.request') asked();
+  };
+  const running = worker();
+  await requested;
+  await running.stop();
+  const journal = new Journal(join(directory, 'state'));
+  expect(journal.get(first.commandId)?.outcome?.status).toBe('needs_attention');
+  expect(journal.get(second.commandId)).toBeNull();
+  await expect(readFile(join(directory, 'repos', 'second'))).rejects.toThrow('ENOENT');
+  expect(
+    messages.some(
+      (message) => message.type === 'command.accepted' && message.commandId === second.commandId,
+    ),
+  ).toBe(false);
+});
+
 it('rejects a pending request after the reply timeout and on drop', async () => {
   const sent: string[] = [];
   const exchange = new CredentialExchange((id) => {

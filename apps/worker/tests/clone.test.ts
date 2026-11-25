@@ -166,10 +166,21 @@ describe('cloneRepository', () => {
     expect(calls.length).toBeGreaterThan(1);
     for (const call of calls) expect(call.args.some((arg) => arg.includes(TOKEN))).toBe(false);
     const holders = calls.filter((call) => call.holdsToken);
-    expect(holders.length).toBeGreaterThan(0);
+    expect(holders).toHaveLength(2);
     for (const holder of holders) {
       expect(holder.args).not.toContain('checkout');
       expect(holder.args.some((arg) => arg === 'fetch' || arg === 'ls-remote')).toBe(true);
+      // No background maintenance that could inherit the token, no weakened TLS, no extra headers.
+      for (const setting of [
+        'maintenance.auto=false',
+        'gc.auto=0',
+        'fetch.writeCommitGraph=false',
+        'http.sslVerify=true',
+        'http.extraHeader=',
+        `safe.directory=${target}`,
+      ])
+        expect(holder.args).toContain(setting);
+      expect(holder.env).toContain('GIT_CONFIG_NOSYSTEM');
     }
     const checkout = calls.find((call) => call.args.includes('checkout'));
     expect(checkout?.holdsToken).toBe(false);
@@ -298,6 +309,58 @@ describe('cloneRepository', () => {
     expect(outcome.status).toBe('failed');
     expect(JSON.stringify(outcome)).not.toContain(wrong);
     expect(JSON.stringify(journal.entries())).not.toContain(wrong);
+  });
+
+  it('ignores a hostile system Git configuration in the processes that hold the token', async () => {
+    await server.addRepository('team/project', { 'README.md': 'x' });
+    const marker = join(directory, 'hostile-helper-ran');
+    const system = join(directory, 'hostile-system.gitconfig');
+    await writeFile(
+      system,
+      [
+        '[credential]',
+        `\thelper = "!touch '${marker}'"`,
+        '[http]',
+        '\textraHeader = X-Atlas-Hostile: 1',
+        '\tsslVerify = false',
+        `[http "${server.url}"]`,
+        '\textraHeader = X-Atlas-Url-Hostile: 1',
+        '',
+      ].join('\n'),
+    );
+    // Stands in for a system configuration at Git's default location: the variable is set for
+    // every Git process the clone starts, after the Worker has built their environment.
+    const hostile = join(directory, 'git-hostile.sh');
+    await writeFile(
+      hostile,
+      `#!/bin/sh\nGIT_CONFIG_SYSTEM='${system}'\nexport GIT_CONFIG_SYSTEM\nexec '${wrapper}' "$@"\n`,
+    );
+    await chmod(hostile, 0o755);
+    const outcome = await cloneRepository(command(), context({ git: hostile }));
+    expect(outcome.status).toBe('succeeded');
+    await expect(readFile(marker)).rejects.toThrow();
+    expect(server.requests.length).toBeGreaterThan(0);
+    for (const request of server.requests) {
+      expect(request.headers['x-atlas-hostile']).toBeUndefined();
+      expect(request.headers['x-atlas-url-hostile']).toBeUndefined();
+    }
+  });
+
+  it('starts nothing when the Worker stopped before the clone began', async () => {
+    await server.addRepository('team/project', { 'README.md': 'x' });
+    const controller = new AbortController();
+    controller.abort();
+    const job = command();
+    let accepted = 0;
+    const outcome = await cloneRepository(
+      job,
+      context({ signal: controller.signal, onAccepted: () => accepted++ }),
+    );
+    expect(outcome.status).toBe('needs_attention');
+    expect(accepted).toBe(0);
+    expect(await readdir(root)).toEqual([]);
+    expect(journal.get(job.commandId)).toBeNull();
+    expect(server.requests).toEqual([]);
   });
 
   it('fails a dot-prefixed target', async () => {

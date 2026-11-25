@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -14,6 +14,7 @@ export interface GitServerRequest {
   method: string;
   url: string;
   authorized: boolean;
+  headers: IncomingHttpHeaders;
 }
 
 export interface GitServer {
@@ -68,7 +69,12 @@ export async function startGitServer(options: { token: string }): Promise<GitSer
 
   const handle = (request: IncomingMessage, response: ServerResponse) => {
     const authorized = request.headers.authorization === expected;
-    requests.push({ method: request.method ?? '', url: request.url ?? '', authorized });
+    requests.push({
+      method: request.method ?? '',
+      url: request.url ?? '',
+      authorized,
+      headers: request.headers,
+    });
     if (!authorized) {
       response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="atlas-test"' });
       response.end();

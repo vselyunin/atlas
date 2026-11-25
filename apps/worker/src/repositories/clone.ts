@@ -97,16 +97,27 @@ const commonConfig = [
   'submodule.recurse=false',
 ];
 
-/** Configuration for the processes that hold the token and talk to the Git host. */
-function networkConfig(host: URL): string[] {
+/**
+ * Configuration for the processes that hold the token and talk to the Git host. They run without
+ * system configuration (GIT_CONFIG_NOSYSTEM), so the target is trusted from the command line,
+ * where Git honours safe.directory. Background maintenance is off: it would inherit the token.
+ */
+function networkConfig(host: URL, target: string): string[] {
   const protocol = host.protocol.slice(0, -1);
   const helper = `!/bin/sh ${[credentialHelperPath, protocol, host.host].map(shellQuote).join(' ')}`;
   return [
-    // An empty value clears helpers from system configuration; only ours remains.
+    `safe.directory=${target}`,
+    // An empty value clears any other helper; only ours remains.
     'credential.helper=',
     `credential.helper=${helper}`,
     'core.askPass=',
+    'http.sslVerify=true',
+    // An empty value clears any extra header.
+    'http.extraHeader=',
     'http.followRedirects=false',
+    'maintenance.auto=false',
+    'gc.auto=0',
+    'fetch.writeCommitGraph=false',
     'protocol.allow=never',
     'protocol.https.allow=always',
     ...(protocol === 'http' && isLoopbackUrl(host) ? ['protocol.http.allow=always'] : []),
@@ -248,6 +259,11 @@ export async function cloneRepository(
     return failure('invalid_command', 'Invalid repository clone request');
   }
   const previous = context.journal.get(command.commandId);
+  // Stopped before this clone began: leave no journal entry, folder or acceptance behind, so the
+  // API dispatches it again after the next connection.
+  if (!previous && context.signal.aborted) {
+    return failure('clone_interrupted', 'The Worker stopped before the clone began', true);
+  }
   if (previous) {
     if (!isDeepStrictEqual(previous.command.payload, command.payload)) {
       throw new Error('A command id cannot be reused with a different payload');
@@ -359,19 +375,21 @@ export async function cloneRepository(
     const secrets = [token, Buffer.from(`x-access-token:${token}`).toString('base64')];
     const network = {
       cwd: target,
-      env: { ...env, [TOKEN_VARIABLE]: token },
+      // No system configuration: it could weaken TLS, add headers or add credential helpers.
+      env: { ...env, GIT_CONFIG_NOSYSTEM: '1', [TOKEN_VARIABLE]: token },
       signal: context.signal,
       timeoutMs: NETWORK_TIME_LIMIT_MS,
       secrets,
     };
+    const config = networkConfig(address, target);
     const head = await runGit(
       git,
-      withConfig(networkConfig(address), ['ls-remote', '--symref', '--', address.href, 'HEAD']),
+      withConfig(config, ['ls-remote', '--symref', '--', address.href, 'HEAD']),
       network,
     );
     await runGit(
       git,
-      withConfig(networkConfig(address), [
+      withConfig(config, [
         'fetch',
         '--quiet',
         '--no-recurse-submodules',

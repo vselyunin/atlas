@@ -75,6 +75,9 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
     active.set(command.commandId, command);
     queue = queue.then(async () => {
       try {
+        // A clone still queued when the Worker stops is not started and gets no result; the API
+        // dispatches it again after the next connection. Queued inits still run, as before.
+        if (command.payload.kind === 'repository.clone' && running.signal.aborted) return;
         const context = {
           root: config.root,
           journal,
