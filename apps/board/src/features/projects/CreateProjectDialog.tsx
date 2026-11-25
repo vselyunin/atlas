@@ -174,7 +174,8 @@ export function CreateProjectDialog({
                     value={repositoryId}
                     onChange={(id, repositoryName) => {
                       setRepositoryId(id);
-                      if (id !== null && repositoryName && !pathEdited) setPath(repositoryName);
+                      if (id !== null && repositoryName && !pathEdited)
+                        setPath(folderFor(repositoryName));
                     }}
                   />
                 )}
@@ -250,6 +251,12 @@ export function CreateProjectDialog({
       </form>
     </Dialog>
   );
+}
+
+// The folder proposed for a repository: its name without leading dots, because the API refuses a
+// folder that starts with a dot (`.github` becomes `github`). Empty when nothing is left.
+function folderFor(repositoryName: string): string {
+  return repositoryName.replace(/^\.+/, '');
 }
 
 // The repository to clone. Reports the chosen ID with the repository's own name, for the folder.
