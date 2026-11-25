@@ -42,6 +42,8 @@ To request local repository initialization, send this body to the same route.
 
 The 202 response contains an operation. Fetch it by ID to follow provisioning. `connectionLost` records a transport interruption independently of the execution outcome. A successful operation exposes its `result.localPath`. When a project creation response is lost, refresh the project list before offering another attempt. Clients never retry this POST automatically.
 
+A relative path whose first part starts with a dot is refused: the API answers 400 `invalid_relative_path` and the Worker refuses it too, because `.atlas-worktrees` holds the task worktrees. This applies to every `local` project. Clients that sent such a path before now receive the 400; the `existing` form has no path and is unaffected.
+
 Names and titles are trimmed and limited to 1–200 characters. Descriptions accept 0–100,000 characters. Relative paths accept 1–1,024 characters. IDs are opaque nonempty strings and timestamps are UTC ISO strings. Version names within a project are unique after trimming and compare case-sensitively.
 
 ### Task revisions and ordering
@@ -68,13 +70,15 @@ The optional creation status extends the HTTP request only. Existing callers tha
 
 ### Errors
 
-| Status | Meaning                                                                         |
-| ------ | ------------------------------------------------------------------------------- |
-| 400    | Invalid input                                                                   |
-| 403    | Forbidden state or origin                                                       |
-| 404    | Unknown entity                                                                  |
-| 409    | Revision conflict or other conflicting state, including duplicate version names |
-| 503    | Worker unavailable                                                              |
+| Status | Meaning                                                                                              |
+| ------ | ---------------------------------------------------------------------------------------------------- |
+| 400    | Invalid input                                                                                        |
+| 401    | No valid session while sign-in is on (`sign_in_required`)                                            |
+| 403    | Forbidden state, origin or role, including `owner_required` and `owner_code_invalid`                 |
+| 404    | Unknown entity                                                                                       |
+| 409    | Revision conflict or other conflicting state, including duplicate version names and `setup_required` |
+| 502    | GitHub did not answer as expected (`github_unavailable`)                                             |
+| 503    | Worker unavailable                                                                                   |
 
 Errors use an `{error:{code,message,details?}}` envelope. For example, a PATCH with no revision can return the schema validation error below.
 
@@ -89,6 +93,49 @@ Errors use an `{error:{code,message,details?}}` envelope. For example, a PATCH w
 ```
 
 Map schema parsing failures to the public error envelope and keep internal stacks out of response bodies. Clients validate any optional details against an expected schema before displaying them and render them as text.
+
+## Sign-in and setup
+
+Sign-in is controlled by the API setting `ATLAS_AUTH`: `github` (default) or `off`; any other value stops the API at start. `buildApp` called from code without sign-in options runs with sign-in off. The server entry point always reads the setting. With sign-in off the API behaves as before this section existed: none of the routes below except `GET /auth/state` exist, and no route needs a session. `GET /auth/state` then answers `{auth:"off",setup:"not_needed",user:null,app:null}`.
+
+With sign-in on, every HTTP route and the Board session socket need a session, except routes marked `public`, `setup` or `worker` below. The session is the `atlas_session` cookie. Without one the API answers 401 `sign_in_required`. Until the GitHub App exists (the App file is missing), every route that needs a session answers 409 `setup_required`. The checks on `Host`, `Origin` and the JSON content type stay. Browsers must send `DELETE` requests with a JSON content type and the body `{}`; `DELETE` is in the CORS method list.
+
+| Method | Path under `/api/v1`     | Access   | Body and answer                                                                              |
+| ------ | ------------------------ | -------- | -------------------------------------------------------------------------------------------- |
+| GET    | `/auth/state`            | `public` | `{auth:"off"\|"github",setup:"not_needed"\|"needed"\|"needs_owner"\|"done",user,app}`        |
+| GET    | `/auth/github/start`     | `public` | 303 to GitHub's authorize page; sets `atlas_signin` for 10 minutes                           |
+| GET    | `/auth/github/callback`  | `public` | 303 to the Board; sets `atlas_session` after a successful sign-in                            |
+| POST   | `/auth/sign-out`         | `public` | 204; deletes the session and clears the cookie                                               |
+| POST   | `/setup/github/start`    | `setup`  | `{organization?}`, answers `{action,manifest}`, the form the Board posts to GitHub           |
+| GET    | `/setup/github/callback` | `setup`  | 303 to the Board with the outcome; writes the App file                                       |
+| POST   | `/setup/owner-code`      | `setup`  | `{code}`, answers 204 and sets `atlas_setup_mark`; 403 `owner_code_invalid` for a wrong code |
+| GET    | `/github/connection`     | session  | `{connection:{name,slug,account,manageUrl,installUrl}}`, read from GitHub                    |
+| GET    | `/members`               | session  | `{items: Member[]}`; a member is `{id,login,name,role,signedIn}`                             |
+| POST   | `/members`               | `owner`  | `{login}`, answers 201 `{member}`; 409 `member_exists`                                       |
+| DELETE | `/members/:userId`       | `owner`  | `{}`, answers 204; 404 `member_not_found`, 409 `owner_not_removable`                         |
+
+`access` is the route's own setting. `public`: no session needed; the route reads the session itself when it needs one. `setup`: anyone while the database has no owner, the owner's session after that. `worker`: the Worker socket, which keeps its token check and ignores sessions. `owner`: the owner's session. A route with no value needs any session. The `user` in the auth state is `{id,login,name,avatarUrl,role}` or `null`. `app` is `{name,account,installUrl}` or `null`; it is filled for a signed-in user, and during setup before an owner exists. A test lists every registered route with its access and checks that each refuses a request without a session, apart from these exceptions.
+
+Cookies, all `HttpOnly` and `SameSite=Lax`, and `Secure` when the Board origin is `https`:
+
+| Cookie              | Holds                                               | Lifetime                                |
+| ------------------- | --------------------------------------------------- | --------------------------------------- |
+| `atlas_session`     | Random session ID; the database keeps only its hash | 30 days from last use                   |
+| `atlas_signin`      | Sign-in `state` and PKCE verifier                   | 10 minutes                              |
+| `atlas_setup_state` | Binds a setup `state` to the browser                | 1 hour                                  |
+| `atlas_setup_mark`  | Lets this browser's first sign-in become the owner  | 30 days; the API ends it with the owner |
+
+The two callbacks carry a code and `state` in their query string. The API omits that query string from its request log and answers every outcome with a redirect to the Board, reporting the result in the Board's address (`?setup=created`, `?setup=failed&reason=…`, `?signin=failed&reason=…&login=…`). A `state` works once and expires: one hour for setup, 10 minutes for sign-in. Pending values live in memory, so an API restart cancels them. Setup is refused with 409 `setup_done` while the App file exists.
+
+The App file, its secrets and the one-time owner code never appear in a response or the log. The owner code is written only to the API's standard output at start.
+
+### Board session socket and sessions
+
+With sign-in on, the upgrade of `/api/v1/tasks/:taskId/session` needs a session in addition to the `Origin` check. The API checks the session again every 30 seconds while the socket is open, and at once on sign-out and on member removal. When the session has ended it closes the socket with code 4401.
+
+### Compatibility
+
+This part adds routes and a requirement. It changes no Worker message, capability or stored project shape. The Worker socket does not use sessions. A Board built before this change cannot sign in, so with sign-in on its requests fail with 401 or 409; deploy the Board with the API, or run the API with `ATLAS_AUTH=off`. Existing tests call the API with sign-in off, so they are unchanged.
 
 ## Worker WebSocket
 

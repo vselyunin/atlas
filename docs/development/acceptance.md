@@ -91,6 +91,45 @@ untracked, so a commit made there outside the sandbox would include them.
 
 Codex was not checked under the sandbox and is unverified.
 
+### Manual checks with real GitHub: sign-in and setup
+
+Status: not yet run. The automated tests for sign-in and setup use a local stand-in for GitHub
+and never reach github.com, so only these steps cover the real service. They need a GitHub
+account that may create Apps, one test repository, and for steps 8 to 10 a second GitHub
+account. Use a fresh database, for example by starting with an unused `ATLAS_DB_PATH` and
+`ATLAS_GITHUB_APP_FILE`. Do not write down the owner code, the App file's content or any token.
+
+1. Run `pnpm dev:web` and open <http://localhost:5173>. Expected: only the setup page shows, with
+   the three "one account" rules.
+2. Choose "Create the GitHub App". Expected: GitHub shows a name like `Atlas-xxxxxx` and asks you
+   to confirm. Confirm.
+3. Expected: the Board shows "Install and sign in" with the App's name and your account. On
+   GitHub, open the App's settings and check: three rights (Contents, Pull requests, Metadata),
+   no Workflows, no webhook, no events, not public.
+4. Choose "Install the App on GitHub" and select only the test repository. Expected: GitHub
+   returns to the Board.
+5. Choose "Sign in with GitHub". Expected: you are signed in as the owner; your name and avatar
+   show in the header.
+6. Open Settings. Expected: the App's name and owning account, and a member list with only you.
+7. Reload the page. Expected: still signed in. Sign out from the user menu. Expected: the sign-in
+   page shows.
+8. Sign in with the second account. Expected: the Board says that account has no access and
+   names it.
+9. Sign in as the owner, add the second account's login in Settings, then sign in with the
+   second account in another browser. Expected: it gets in, and has no member list or setup
+   rights.
+10. As the owner, remove that member. Expected: the second browser returns to the sign-in page
+    on its next request; an open terminal in it closes. Sign in with the second account again.
+    Expected: no access.
+11. Restart the API with `ATLAS_AUTH=off`. Expected: no sign-in, and a permanent "Sign-in is off"
+    notice on the Board. Restart with sign-in on again. Expected: the sign-in page.
+12. Stop Atlas, delete the App file and the App on GitHub, and start again. Expected: the setup
+    page returns; the owner stays signed in and can create a new App.
+13. Start again from a fresh database and App file. Create the App and install it, but do not
+    sign in. Restart the API and read the owner code from its output. In a different browser,
+    enter it on the setup page, then sign in. Expected: that browser becomes the owner. Without
+    the code, signing in from that browser is refused.
+
 ## Review and test permissions
 
 The container and sandbox work was split into 11 tasks. Tasks 1 to 10 each had an independent

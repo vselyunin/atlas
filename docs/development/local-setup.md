@@ -38,6 +38,7 @@ Default local state is in the ignored `.atlas/` directory:
   keeps two Workers apart only when they share a PID namespace; it does not keep a native
   Worker and the container Worker apart (see "What the sandbox does not protect").
 - `worker-token`: secret shared by the local API and Worker.
+- `github-app.json`: the secrets of the GitHub App that signs people in; see "The App file".
 
 Ctrl+C stops all services, including the container; it does not erase data or
 repositories. Restart with `pnpm dev`. Do not run two copies of the same Worker
@@ -48,6 +49,174 @@ launcher itself is killed hard (for example `kill -9`) can the API, Board and th
 `atlas-worker` container be left running; then clean up with `docker rm -f atlas-worker` and
 stop the leftover node processes after checking their ownership. Do not start a second stack
 while they run.
+
+## Sign in with GitHub
+
+The first time you start Atlas, the Board shows only a setup page until you create a GitHub
+App. This applies to every start with the default `ATLAS_AUTH=github`, including an existing
+installation after an upgrade: its projects, tasks and Worker are unchanged, but nobody can use
+the Board until setup is done and someone signs in. To run without sign-in, see "Run without
+sign-in". Every installation has its own App; Atlas is not a service and shares nothing with
+other installations.
+
+### One GitHub account per installation
+
+Read these before you choose the account on the setup page.
+
+- One Atlas works with the repositories of exactly one GitHub account, a person's or an
+  organization's. The App is not public, so GitHub lets it be installed only on the account that
+  owns it.
+- An App owned by a personal account cannot reach an organization's repositories. To use an
+  organization's repositories, create the App under that organization on the setup page. That
+  needs someone allowed to create Apps there.
+- For an organization's App, the people who sign in must be members of that organization. For a
+  personal App, GitHub is expected to let only its owner sign in, so a personal installation
+  has one user. This was not tested with a second account. Atlas does not depend on it: a person
+  gets in only when they are the owner or a member the owner added.
+
+### First-run setup
+
+1. Start Atlas (`pnpm dev` or `pnpm dev:web`) and open <http://localhost:5173>.
+2. On the setup page, leave the organization field empty to use your own account, or enter an
+   organization's name. Choose "Create the GitHub App".
+3. GitHub shows the App's name. Atlas proposes `Atlas-` plus six random characters, because App
+   names are unique across GitHub; you can change it. Confirm to create the App. Finish within
+   one hour; GitHub allows no longer.
+4. GitHub returns you to the Board. Atlas checks with GitHub that the App is not public and has
+   only the rights it asked for, then writes the App file. If a check fails, nothing is stored
+   and the Board says why.
+5. Choose "Install the App on GitHub" and pick the repositories the App may use. Atlas uses no
+   repository this iteration, but the choice is the account's limit for what comes next. GitHub
+   returns you to the Board.
+6. Choose "Sign in with GitHub". You become the owner if you sign in with the browser that
+   created the App. Use the same browser from step 2 to this step.
+
+The App asks for Contents (read and write), Pull requests (read and write) and Metadata (read).
+It does not ask for Workflows, has no webhook and subscribes to no events. Contents and Pull
+requests are requested now so that you do not have to approve a wider right on GitHub later;
+nothing in Atlas uses them yet. Sign-in itself grants no repository right.
+
+If setup fails after GitHub already created the App, for example because Atlas could not write
+the file, the App exists on GitHub but Atlas has forgotten it. Delete the App named like
+`Atlas-xxxxxx` in your GitHub settings (Developer settings, GitHub Apps) before you try again.
+Otherwise it stays there with its keys.
+
+If you finish in another browser, or lose the cookie, nobody becomes the owner by signing in.
+Atlas does not let the first sign-in win. Instead, the API prints a one-time owner code on its
+standard output each time it starts, while the App file exists and no owner does. Under
+`pnpm dev` it is in the terminal that runs the stack. Enter it on the setup page ("Use owner
+code") in the browser you want, then sign in. The code is created only when the API starts, so
+restart the API to get a new one. It works once, and it and the cookie stop working as soon as
+an owner exists. The cookie that marks the owner's browser lapses after 30 days.
+
+Setup of a fresh installation is open to whoever can reach the API. The API listens on loopback
+only, so that means a process on the same machine. Once an owner exists, every setup request
+needs the owner's session.
+
+### Sign-in, members and sessions
+
+- Sign-in uses GitHub's authorization-code flow with `state` and PKCE and asks for no scopes.
+  Atlas reads your account number, login, name and avatar, and discards the GitHub token at
+  once (it asks GitHub to revoke it). Atlas stores no GitHub token.
+- The owner can always sign in. The owner adds other people in Settings (the user menu in the
+  Board header) by their GitHub login. The entry shows "Invited" until that person first signs
+  in, when Atlas binds it to the account's number; after that a renamed or re-registered login
+  cannot take it over.
+- A person whose account is not in the list sees a message naming the account they signed in
+  with, so they can tell if they used the wrong one.
+- There is one owner and one other role, member. Only the owner manages members or runs setup
+  again. Ownership cannot be transferred and the owner cannot be removed.
+- Every signed-in person sees and can change every project and task. Members are checked on every
+  request, so removing one takes effect at once.
+- A session lasts 30 days from its last use. The cookie is `atlas_session`, with `HttpOnly` and
+  `SameSite=Lax`, and `Secure` when `ATLAS_BOARD_ORIGIN` is `https`. Atlas stores only a hash of
+  the session ID. Sign out from the user menu. Removing a member ends their sessions. An open
+  terminal socket closes at once on sign-out and on member removal; if the session ends another
+  way, for example by expiry, it closes within 30 seconds, and the Board is told with close code 4401.
+- The request log leaves out the query strings of the two GitHub callback addresses, which carry
+  a code and `state`.
+
+### Settings
+
+| Setting                 | Meaning                                                                                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ATLAS_AUTH`            | API. `github` (default) or `off`. Any other value, including an empty one, stops the API at start.                                                                                                                                                     |
+| `ATLAS_GITHUB_APP_FILE` | API. Path of the App file. Default `.atlas/github-app.json`. `pnpm dev` resolves it from the repository root; for an API started by itself, use an absolute path, because the API package runs from its own folder.                                    |
+| `ATLAS_GITHUB_API_URL`  | API. GitHub's REST address. Default `https://api.github.com`. For tests that point the API at a stand-in; leave it unset.                                                                                                                              |
+| `ATLAS_GITHUB_WEB_URL`  | API. GitHub's web address. Default `https://github.com`. For the same purpose; leave it unset.                                                                                                                                                         |
+| `ATLAS_GIT_HOST_URL`    | Worker. The Git host the Worker uses for GitHub repositories. Default `https://github.com`; `http` is accepted only for a loopback address. `pnpm dev` passes it to the container. Atlas does not use it for sign-in; later work on repositories does. |
+
+If you change `ATLAS_BOARD_ORIGIN`, GitHub still holds the old addresses. In the App's settings
+on GitHub (Settings, Developer settings, GitHub Apps, your App) update the homepage URL, the
+callback URL (`<Board origin>/api/v1/auth/github/callback`) and the setup URL
+(`<Board origin>/?github=installed`). Until you do, sign-in returns to the old address.
+
+### The App file
+
+The API keeps the App's ID, name, owning account, client ID, client secret and private key in
+one file, by default `.atlas/github-app.json` (ignored by Git), created with mode `0600`. The
+API never returns or logs these values. Treat the file like `worker-token`, only more
+sensitive: the private key can act as the App on every repository you installed it on.
+
+- Never commit it, paste it into a chat, a ticket or a log, print it, or copy it into a
+  backup that others can read.
+- Keep it out of any Worker's workspace root and state directory, and do not mount it into a
+  container. The API refuses to start when the file lies inside the workspace root of a Worker
+  registered in its database, and when the file exists but cannot be read as an App file.
+- The mode protects it only on a Linux filesystem. On a Windows drive under WSL, where this
+  checkout normally is, modes do not apply and the file is as protected as your Windows account.
+- If it may have leaked, delete the App on GitHub and remove the connection as described below.
+
+### Run without sign-in
+
+Set `ATLAS_AUTH=off` in `.env` or the environment and restart. The API then behaves as it did
+before sign-in existed: no sign-in, no setup, no GitHub features, and no session needed for any
+route. The Board shows a permanent notice that sign-in is off. Anyone who can reach the API can
+use Atlas, so keep it on loopback. The App file, users and sessions are left as they are; set
+`ATLAS_AUTH=github` again to return to them. Automated tests and `scripts/e2e-server.mjs` run
+with sign-in off.
+
+### Remove the connection
+
+Removal is manual.
+
+1. Stop Atlas.
+2. Delete the App file.
+3. Delete the App on GitHub: Settings, Developer settings, GitHub Apps, the App, Advanced,
+   Delete. Without this the App and its keys stay valid on GitHub.
+4. Start Atlas again. Setup runs again, as described above, except that the owner must be
+   signed in to run it, and nobody else can.
+
+What stays: the users, members and their sessions, and all projects and tasks, remain in the
+database. The owner stays signed in and can run setup again without a mark or code. Until setup
+is done, every route that needs a session answers 409 `setup_required`, and the Board shows the
+setup page. Sessions do not depend on the App file, so signed-in people stay signed in, and
+members stay bound to their account numbers. Atlas has no way to change the owner; starting with
+no users means deleting the database, which also deletes projects and tasks.
+
+### Known limits
+
+- The check that keeps the App file out of a Worker's workspace root compares paths as the API
+  sees them. A Worker in a Docker container reports container paths, so the check cannot see the
+  Worker's side. Keep the App file out of the folder that `pnpm dev` mounts into the container
+  yourself.
+- The API is meant to listen on loopback. Pending sign-ins and setups are held in memory, capped
+  (100 sign-ins, 50 setups), and lost when the API restarts; start again if you restart in the
+  middle.
+  Hosting Atlas for other machines (HTTPS, a public address, a token per Worker) is not
+  supported.
+- Anyone who can run a process on the machine can reach the API. Sign-in stops them using it; it
+  does not stop them reading `.atlas/`.
+- The browser sends a `localhost` cookie to every port on `localhost`, so another local web
+  service receives the session cookie and can overwrite it.
+- A Worker run natively, or with `ATLAS_AGENT_SANDBOX=off`, runs its agents as your own account.
+  Such an agent can read the App file if it lies where your account can read it.
+- Live checks against real GitHub on 2026-11-25 covered `localhost` addresses in the manifest
+  flow, creating an App with no webhook, sign-in of the App's owner, and revoking a token early.
+  Sign-in from a second GitHub account and one further check were not tried; see "What was
+  checked, and what was not" in
+  `docs/superpowers/specs/2026-11-25-github-connection-design.md`. The manual steps are in
+  `docs/development/acceptance.md`, not yet run.
 
 ## Docker in WSL
 
@@ -191,7 +360,9 @@ Optionally copy `.env.example` to `.env` and customize values. The combined
 launcher resolves relative database/workspace/state paths from the repository
 root. Worker state must remain outside project repository targets. A new local
 repository path is relative to the displayed workspace; its parent must already
-exist and the final folder must not exist. Existing Git URL mode only records a
+exist and the final folder must not exist. The first part of the path must not start with a
+dot: the API answers 400 `invalid_relative_path` and the Worker refuses it too, because
+`.atlas-worktrees` holds the task worktrees. Existing Git URL mode only records a
 URL and never clones it.
 
 For independently started apps (a native Worker without the container, for debugging
@@ -242,7 +413,8 @@ on success, failure and interruption. Keep personal `.atlas` data out of tests.
 If the Worker is missing or offline:
 
 1. Check API and Worker startup output, then request `/api/v1/workers` on the
-   configured API port to inspect registration and availability.
+   configured API port to inspect registration and availability. With sign-in on this route
+   needs a session, so open it in the browser where you are signed in.
 2. Confirm the Worker WebSocket URL points to that API and both processes use
    the same token. Do not print or paste the token into logs or the Board.
 3. Check for a duplicate Worker identity or an already-running process using
