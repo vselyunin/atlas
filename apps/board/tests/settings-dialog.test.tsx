@@ -36,12 +36,12 @@ function respond(body: unknown, status = 200) {
     headers: { 'Content-Type': 'application/json' },
   });
 }
-function stubApi(list: Member[] = people) {
+function stubApi(list: Member[] = people, connectionBody: unknown = connection) {
   let items = list;
   const handle = (input: string, init?: RequestInit): Response => {
     const path = input.replace('/api/v1', '');
     const method = init?.method ?? 'GET';
-    if (path === '/github/connection') return respond(connection);
+    if (path === '/github/connection') return respond(connectionBody);
     if (path === '/members' && method === 'GET') return respond({ items });
     if (path === '/members' && method === 'POST') {
       const { login } = sent(init) as { login: string };
@@ -127,4 +127,17 @@ it('shows a member the connection and no member controls', async () => {
   expect(screen.queryByLabelText('GitHub login')).toBeNull();
   expect(screen.queryByRole('button', { name: /Add member|Remove/ })).toBeNull();
   expect(fetchStub.mock.calls.some(([path]) => path.endsWith('/members'))).toBe(false);
+});
+
+it('renders no link for a manage or install address that is not a web address', async () => {
+  stubApi(people, {
+    connection: {
+      ...connection.connection,
+      manageUrl: 'javascript:alert(1)',
+      installUrl: 'javascript:alert(1)',
+    },
+  });
+  renderDialog(member);
+  expect(await screen.findByText('Atlas-ab12cd')).toBeTruthy();
+  expect(screen.queryByRole('link')).toBeNull();
 });

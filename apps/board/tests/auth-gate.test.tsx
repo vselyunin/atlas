@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AuthStateResponse } from '@atlas/contracts';
@@ -218,9 +218,9 @@ it('refuses to post the manifest to a non-web address', async () => {
   expect(submit).not.toHaveBeenCalled();
 });
 
-it('keeps the start button disabled once the form is being posted', async () => {
-  vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => undefined);
-  stubApi({ auth: 'github', setup: 'needed', user: null, app: null }, (path) =>
+it('keeps the start button disabled and posts only once after the form is submitted', async () => {
+  const submit = vi.spyOn(HTMLFormElement.prototype, 'submit').mockImplementation(() => undefined);
+  const fetchStub = stubApi({ auth: 'github', setup: 'needed', user: null, app: null }, (path) =>
     path === '/api/v1/setup/github/start'
       ? respond({ action: 'https://github.com/settings/apps/new?state=s', manifest: '{}' })
       : undefined,
@@ -228,8 +228,17 @@ it('keeps the start button disabled once the form is being posted', async () => 
   renderGate();
   const user = userEvent.setup();
   await user.click(await screen.findByRole('button', { name: 'Create the GitHub App' }));
+  await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
   const button = await screen.findByRole('button', { name: 'Opening GitHub…' });
-  await waitFor(() => expect(button.hasAttribute('disabled')).toBe(true));
+  expect(button.hasAttribute('disabled')).toBe(true);
+  await user.click(button);
+  const form = screen.getByLabelText(/Organization/).closest('form');
+  if (!form) throw new Error('The setup form is missing');
+  fireEvent.submit(form);
+  await user.type(screen.getByLabelText(/Organization/), '{Enter}');
+  expect(submit).toHaveBeenCalledTimes(1);
+  const starts = fetchStub.mock.calls.filter(([path]) => path.endsWith('/setup/github/start'));
+  expect(starts).toHaveLength(1);
 });
 
 it('renders no link for an install address that is not a web address', async () => {
