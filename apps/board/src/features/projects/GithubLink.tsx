@@ -54,6 +54,12 @@ export function GithubLink({ project }: { project: Project | undefined }) {
   });
   const installUrl = connection.data?.connection.installUrl;
   const busy = create.isPending || remove.isPending;
+  // A new attempt starts clean, so an old refusal from one action is not shown for the other.
+  const attempt = (run: () => void) => {
+    create.reset();
+    remove.reset();
+    run();
+  };
 
   let body;
   if (!project) {
@@ -85,7 +91,7 @@ export function GithubLink({ project }: { project: Project | undefined }) {
             type="button"
             className="button secondary"
             disabled={busy}
-            onClick={() => remove.mutate()}
+            onClick={() => attempt(() => remove.mutate())}
           >
             {remove.isPending ? 'Unlinking…' : 'Unlink'}
           </button>
@@ -99,7 +105,7 @@ export function GithubLink({ project }: { project: Project | undefined }) {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (repositoryId !== null && !busy) create.mutate(repositoryId);
+          if (repositoryId !== null && !busy) attempt(() => create.mutate(repositoryId));
         }}
       >
         <RepositoryPicker value={repositoryId} onChange={setRepositoryId} />

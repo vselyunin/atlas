@@ -1,10 +1,34 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ProjectCreateResponseSchema } from '@atlas/contracts';
+import { ProjectCreateResponseSchema, REPOSITORY_CLONE_CAPABILITY } from '@atlas/contracts';
 import type { Worker } from '@atlas/contracts';
-import { FolderGit2, Link2 } from 'lucide-react';
+import { FolderGit2, Github, Link2 } from 'lucide-react';
 import { Dialog } from '../../components/ui/dialog';
-import { request, errorMessage } from '../../lib/api';
+import { ApiError, request, errorMessage } from '../../lib/api';
+import { useAuthState } from '../../lib/auth';
+import { useGithubRepositories } from '../../lib/queries';
+import { RepositoryPicker } from './RepositoryPicker';
+
+type Mode = 'existing' | 'local' | 'clone';
+
+// Plain sentences for the refusals that only a clone can meet.
+function cloneRefusal(error: unknown): string | undefined {
+  if (!(error instanceof ApiError)) return undefined;
+  switch (error.code) {
+    case 'worker_unavailable':
+      return 'That Worker cannot clone right now. Choose an online Worker that can clone, or start it and try again.';
+    case 'repository_not_accessible':
+      return 'The GitHub App cannot reach that repository. Choose repositories for Atlas on GitHub, then try again.';
+    case 'github_unavailable':
+      return 'Atlas could not reach GitHub. Try again in a moment.';
+    case 'invalid_relative_path':
+      return 'Choose a folder under the Worker workspace. It cannot start with a dot or contain "..".';
+    case 'setup_required':
+      return 'Atlas is not connected to GitHub yet. Finish setting up the GitHub App first.';
+    default:
+      return undefined;
+  }
+}
 
 export function CreateProjectDialog({
   workers,
@@ -15,31 +39,45 @@ export function CreateProjectDialog({
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
-  const available = workers.filter(
-    (worker) =>
-      worker.kind === 'atlas' &&
-      worker.availability === 'online' &&
-      worker.capabilities.includes('repository.init'),
+  const auth = useAuthState().data;
+  const signedIn = auth?.auth === 'github' && !!auth.user;
+  const online = workers.filter(
+    (worker) => worker.kind === 'atlas' && worker.availability === 'online',
   );
-  const [mode, setMode] = useState<'existing' | 'local'>('existing');
+  const available = online.filter((worker) => worker.capabilities.includes('repository.init'));
+  const cloners = online.filter((worker) =>
+    worker.capabilities.includes(REPOSITORY_CLONE_CAPABILITY),
+  );
+  const [chosen, setMode] = useState<Mode>('existing');
+  const mode = chosen === 'clone' && !signedIn ? 'existing' : chosen;
   const [name, setName] = useState('');
   const [gitUrl, setGitUrl] = useState('');
   const [path, setPath] = useState('');
   const [workerId, setWorkerId] = useState('');
+  const [repositoryId, setRepositoryId] = useState<number | null>(null);
+  const [pathEdited, setPathEdited] = useState(false);
+  const candidates = mode === 'clone' ? cloners : available;
   const worker =
-    available.find((item) => item.id === workerId) ??
-    (available.length === 1 ? available[0] : undefined);
+    candidates.find((item) => item.id === workerId) ??
+    (candidates.length === 1 ? candidates[0] : undefined);
   const client = useQueryClient();
   const mutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (submitted: Mode) =>
       request('/projects', ProjectCreateResponseSchema, {
         method: 'POST',
         body: JSON.stringify({
           name,
           repository:
-            mode === 'existing'
-              ? { mode, gitUrl }
-              : { mode, workerId: worker?.id, relativePath: path },
+            submitted === 'existing'
+              ? { mode: 'existing', gitUrl }
+              : submitted === 'clone'
+                ? {
+                    mode: 'local',
+                    workerId: worker?.id,
+                    relativePath: path,
+                    githubRepositoryId: repositoryId,
+                  }
+                : { mode: 'local', workerId: worker?.id, relativePath: path },
         }),
       }),
     onSuccess: async ({ project }) => {
@@ -51,6 +89,11 @@ export function CreateProjectDialog({
       void client.invalidateQueries({ queryKey: ['projects'] });
     },
   });
+  const refusal = mutation.variables === 'clone' ? cloneRefusal(mutation.error) : undefined;
+  const incomplete =
+    mode === 'clone'
+      ? repositoryId === null || !worker || !path.trim()
+      : mode === 'local' && (!worker || !path.trim());
   return (
     <Dialog
       title="Create project"
@@ -60,7 +103,7 @@ export function CreateProjectDialog({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          if (!mutation.isPending) mutation.mutate();
+          if (!mutation.isPending && !incomplete) mutation.mutate(mode);
         }}
       >
         <fieldset disabled={mutation.isPending}>
@@ -75,7 +118,7 @@ export function CreateProjectDialog({
                 placeholder="My next project"
               />
             </label>
-            <div className="mode-options">
+            <div className={signedIn ? 'mode-options three' : 'mode-options'}>
               <button
                 type="button"
                 className={mode === 'existing' ? 'mode active' : 'mode'}
@@ -96,6 +139,18 @@ export function CreateProjectDialog({
                 <strong>New local repository</strong>
                 <span>Initialize a fresh folder</span>
               </button>
+              {signedIn && (
+                <button
+                  type="button"
+                  className={mode === 'clone' ? 'mode active' : 'mode'}
+                  onClick={() => setMode('clone')}
+                  aria-pressed={mode === 'clone'}
+                >
+                  <Github size={20} />
+                  <strong>Clone from GitHub</strong>
+                  <span>Copy a repository onto a Worker</span>
+                </button>
+              )}
             </div>
             {mode === 'existing' ? (
               <>
@@ -114,23 +169,39 @@ export function CreateProjectDialog({
               </>
             ) : (
               <>
-                <label>
-                  Atlas worker
-                  <select
-                    aria-label="Atlas worker"
-                    required
-                    value={worker?.id ?? ''}
-                    onChange={(e) => setWorkerId(e.target.value)}
-                  >
-                    <option value="">Select an online worker</option>
-                    {available.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                {!available.length && (
+                {mode === 'clone' && (
+                  <CloneRepository
+                    value={repositoryId}
+                    onChange={(id, repositoryName) => {
+                      setRepositoryId(id);
+                      if (id !== null && repositoryName && !pathEdited) setPath(repositoryName);
+                    }}
+                  />
+                )}
+                {mode === 'clone' && !cloners.length ? (
+                  <p role="status" className="error">
+                    No connected Worker can clone repositories. Update and start your Worker, then
+                    try again.
+                  </p>
+                ) : (
+                  <label>
+                    Atlas worker
+                    <select
+                      aria-label="Atlas worker"
+                      required
+                      value={worker?.id ?? ''}
+                      onChange={(e) => setWorkerId(e.target.value)}
+                    >
+                      <option value="">Select an online worker</option>
+                      {candidates.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {mode === 'local' && !available.length && (
                   <p role="status" className="error">
                     No repository worker is online. Start your Worker, or link an existing
                     repository.
@@ -142,7 +213,10 @@ export function CreateProjectDialog({
                     required
                     maxLength={1024}
                     value={path}
-                    onChange={(e) => setPath(e.target.value)}
+                    onChange={(e) => {
+                      setPath(e.target.value);
+                      setPathEdited(true);
+                    }}
                     placeholder="my-project"
                   />
                 </label>
@@ -158,8 +232,8 @@ export function CreateProjectDialog({
         </fieldset>
         {mutation.error && (
           <p role="alert" className="error">
-            {errorMessage(mutation.error)} If the connection was lost, check the project list before
-            trying again.
+            {refusal ??
+              `${errorMessage(mutation.error)} If the connection was lost, check the project list before trying again.`}
           </p>
         )}
         <div className="form-actions">
@@ -168,14 +242,32 @@ export function CreateProjectDialog({
           </button>
           <button
             className="button primary"
-            disabled={
-              mutation.isPending || !name.trim() || (mode === 'local' && (!worker || !path.trim()))
-            }
+            disabled={mutation.isPending || !name.trim() || incomplete}
           >
             {mutation.isPending ? 'Creating…' : 'Create project'}
           </button>
         </div>
       </form>
     </Dialog>
+  );
+}
+
+// The repository to clone. Reports the chosen ID with the repository's own name, for the folder.
+function CloneRepository({
+  value,
+  onChange,
+}: {
+  value: number | null;
+  onChange: (repositoryId: number | null, repositoryName?: string) => void;
+}) {
+  const repositories = useGithubRepositories();
+  return (
+    <RepositoryPicker
+      value={value}
+      onChange={(id) => {
+        const full = repositories.data?.items.find((item) => item.id === id)?.fullName;
+        onChange(id, full?.split('/').pop());
+      }}
+    />
   );
 }

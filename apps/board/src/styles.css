@@ -651,6 +651,14 @@ fieldset {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.mode-options.three {
+  grid-template-columns: repeat(3, 1fr);
+}
+@media (max-width: 560px) {
+  .mode-options.three {
+    grid-template-columns: 1fr;
+  }
+}
 .mode {
   border: 1px solid var(--border);
   border-radius: 7px;

@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useEffect, useId } from 'react';
 import { errorMessage } from '../../lib/api';
 import { isWebUrl } from '../../lib/auth';
 import { useGithubConnection, useGithubRepositories } from '../../lib/queries';
@@ -15,6 +15,11 @@ export function RepositoryPicker({
   const repositories = useGithubRepositories();
   const connection = useGithubConnection();
   const installUrl = connection.data?.connection.installUrl;
+  const items = repositories.data?.items;
+  // A choice the list no longer holds (the App lost access, or the list was refreshed) is dropped.
+  useEffect(() => {
+    if (items && value !== null && !items.some((item) => item.id === value)) onChange(null);
+  }, [items, value, onChange]);
   if (repositories.isPending) return <p role="status">Loading repositories…</p>;
   if (repositories.error) {
     return (
