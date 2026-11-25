@@ -63,6 +63,8 @@ export function registerSetupRoutes(
       });
       reply.clearCookie(SETUP_STATE_COOKIE, stateCookie);
       if (result.mark) giveMark(reply, result.mark);
+      // No error text: it could name the App file or carry details of the failure.
+      if (result.unexpected) request.log.error('GitHub App setup failed with an unexpected error');
       const outcome = new URL(result.redirect).searchParams;
       request.log.info(
         { setup: outcome.get('setup'), reason: outcome.get('reason') ?? undefined },

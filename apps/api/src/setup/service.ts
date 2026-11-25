@@ -107,7 +107,7 @@ export class SetupService {
     state?: string;
     error?: string;
     cookie?: string;
-  }): Promise<{ redirect: string; mark?: string }> {
+  }): Promise<{ redirect: string; mark?: string; unexpected?: true }> {
     const board = this.options.boardOrigin;
     try {
       // A `state` is used once, whatever the outcome.
@@ -127,20 +127,37 @@ export class SetupService {
         throw new Refused('state_invalid');
       }
       this.finishing = true;
-      let mark: string;
+      let mark: string | undefined;
       try {
         const secrets = await this.verifiedApp(params.code);
-        this.options.appFile.write(secrets);
-        mark = this.issueMark();
+        // The mark is stored before the file is written, so a written App file always comes with
+        // a mark. An existing owner needs none: they are signed in already.
+        mark = hasOwner(this.options.context) ? undefined : this.issueMark();
+        try {
+          this.options.appFile.write(secrets);
+        } catch (error) {
+          if (mark !== undefined) this.dropMark();
+          throw error;
+        }
       } finally {
         this.finishing = false;
       }
-      return { redirect: `${board}/?setup=created`, mark };
+      return { redirect: `${board}/?setup=created`, ...(mark === undefined ? {} : { mark }) };
     } catch (error) {
       if (error instanceof Refused) {
         return { redirect: `${board}/?setup=failed&reason=${error.reason}` };
       }
-      throw error;
+      // Anything else (the App file or the database failing) still ends in a redirect. The
+      // created App's secrets are not kept; the owner deletes that App on GitHub and starts again.
+      return { redirect: `${board}/?setup=failed&reason=github_failed`, unexpected: true };
+    }
+  }
+
+  private dropMark() {
+    try {
+      this.options.context.db.delete(installation).where(eq(installation.key, MARK_KEY)).run();
+    } catch {
+      // Without an App file the mark leads nowhere; the next start removes it.
     }
   }
 

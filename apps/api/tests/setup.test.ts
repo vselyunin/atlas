@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AuthStateResponseSchema, GithubConnectionResponseSchema } from '@atlas/contracts';
 import SQLite from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -289,6 +299,9 @@ describe('setup with no App file and no owner', () => {
     );
     expect(response.headers.location).toBe(failedTo('state_invalid'));
     expectNothingWritten(response);
+    // A refused callback clears the browser's state cookie too.
+    const cleared = response.cookies.find((entry) => entry.name === STATE_COOKIE);
+    expect(cleared).toMatchObject({ value: '', path: '/api/v1/setup/github' });
   });
 
   it('refuses a callback without a state', async () => {
@@ -467,6 +480,64 @@ describe('setup once an owner exists', () => {
     );
     expect(response.headers.location).toBe(`${BOARD_ORIGIN}/?setup=created`);
     expect(existsSync(api.appFile)).toBe(true);
+    // The owner is signed in already: no setup mark is given or stored.
+    expect(response.cookies.find((entry) => entry.name === MARK_COOKIE)).toBeUndefined();
+    expect(installationRows(api)).toEqual([]);
+  });
+});
+
+describe('setup when the App file cannot be written', () => {
+  let base: string;
+  let appFile: string;
+  beforeEach(async () => {
+    resetStandIn();
+    // The App file's folder is a link to nothing: reading finds no file, writing fails.
+    base = await mkdtemp(join(tmpdir(), 'atlas-setup-write-'));
+    symlinkSync(join(base, 'missing'), join(base, 'gone'));
+    appFile = join(base, 'gone', 'github-app.json');
+    time = Date.parse('2026-11-25T10:00:00.000Z');
+    logLines = [];
+    api = await buildAuthApp({
+      now: () => new Date(time),
+      logStream: { write: (line: string) => void logLines.push(line) },
+      auth: {
+        appFile,
+        githubApiUrl: github.apiUrl,
+        githubWebUrl: github.webUrl,
+        ownerCodeSink: () => undefined,
+      },
+    });
+  });
+  afterEach(async () => {
+    await api.close();
+    await rm(base, { recursive: true, force: true });
+  });
+
+  it('redirects with github_failed, clears the state cookie and writes nothing', async () => {
+    const { state, cookie } = await start(api.app);
+    github.state.manifestCodes.push('code-a');
+    const response = await callback(api.app, { code: 'code-a', state }, { [STATE_COOKIE]: cookie });
+    expect(response.statusCode).toBe(303);
+    expect(response.headers.location).toBe(failedTo('github_failed'));
+    const cleared = response.cookies.find((entry) => entry.name === STATE_COOKIE);
+    expect(cleared).toMatchObject({ value: '', path: '/api/v1/setup/github' });
+    expect(response.cookies.find((entry) => entry.name === MARK_COOKIE)).toBeUndefined();
+    expect(existsSync(appFile)).toBe(false);
+    expect(readdirSync(base)).toEqual(['gone']);
+    expect(installationRows(api)).toEqual([]);
+
+    const log = logLines.join('');
+    expect(log).toContain('GitHub App setup failed with an unexpected error');
+    for (const secret of [
+      state,
+      cookie,
+      'code-a',
+      github.secrets.clientSecret,
+      github.secrets.privateKey.split('\n')[1] ?? 'missing',
+      appFile,
+    ]) {
+      expect(log).not.toContain(secret);
+    }
   });
 });
 
