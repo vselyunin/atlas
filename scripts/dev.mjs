@@ -48,6 +48,7 @@ if (!env.ATLAS_WORKER_TOKEN) {
 env.ATLAS_API_PORT ??= '4310';
 env.ATLAS_BOARD_ORIGIN ??= 'http://localhost:5173';
 env.ATLAS_DB_PATH = resolve(root, env.ATLAS_DB_PATH ?? '.atlas/atlas.sqlite');
+env.ATLAS_GITHUB_APP_FILE = resolve(root, env.ATLAS_GITHUB_APP_FILE ?? '.atlas/github-app.json');
 env.ATLAS_API_WS_URL ??= `ws://127.0.0.1:${env.ATLAS_API_PORT}/api/v1/workers/connect`;
 env.ATLAS_WORKER_ID ??= 'atlas:local';
 env.ATLAS_WORKER_NAME ??= 'Local Atlas worker';

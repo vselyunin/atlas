@@ -1,8 +1,12 @@
 import { ErrorResponseSchema, MAX_WS_FRAME_BYTES } from '@atlas/contracts';
+import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import Fastify from 'fastify';
 import type { FastifyInstance } from 'fastify';
+import { registerAccess, trackRoutes } from './auth/access.js';
+import { registerAuthRoutes } from './auth/routes.js';
+import { SessionStore } from './auth/sessions.js';
 import type { ApiOptions } from './config.js';
 import { isLocalHost, validateOptions } from './config.js';
 import { openDatabase } from './db/client.js';
@@ -17,10 +21,10 @@ import { registerGateway } from './workers/gateway.js';
 import { WorkerRegistry } from './workers/registry.js';
 import { registerWorkerRoutes } from './workers/routes.js';
 
-export type { ApiOptions } from './config.js';
+export type { ApiOptions, AuthOptions } from './config.js';
 
 export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
-  const { dbPath, workerToken, allowedOrigin, now, logger } = validateOptions(options);
+  const { dbPath, workerToken, allowedOrigin, now, logger, auth } = validateOptions(options);
   const database = openDatabase(dbPath, now);
   const context = { db: database.db, now };
   const registry = new WorkerRegistry(context);
@@ -46,6 +50,8 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     }
     done();
   });
+  trackRoutes(app);
+  const authSessions = new SessionStore(context);
 
   try {
     await app.register(cors, {
@@ -54,6 +60,7 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
       allowedHeaders: ['Content-Type'],
       strictPreflight: false,
     });
+    await app.register(cookie);
     await app.register(websocket, {
       options: { maxPayload: MAX_WS_FRAME_BYTES },
       errorHandler(_error, socket, request) {
@@ -65,6 +72,8 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
         this.websocketServer.close(done);
       },
     });
+    registerAccess(app, context, authSessions, auth);
+    registerAuthRoutes(app, context, authSessions, auth);
     registerProjectRoutes(app, context, registry);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);

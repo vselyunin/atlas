@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@atlas/contracts": "workspace:*",
+    "@fastify/cookie": "^11.1.5",
     "@fastify/cors": "^11.0.0",
     "@fastify/websocket": "^11.0.0",
     "better-sqlite3": "^12.0.0",

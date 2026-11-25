@@ -4,13 +4,13 @@ import { REPOSITORY_INIT_CAPABILITY } from '@atlas/contracts';
 import type { Operation, Project, ProjectCreate, ProjectCreateResponse } from '@atlas/contracts';
 import { asc, eq } from 'drizzle-orm';
 import type { ApiContext, DbTransaction } from '../db/client.js';
-import { operations, projects, workers } from '../db/schema.js';
+import { operations, projectFields, projects, workers } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { addVersion } from '../versions/service.js';
 import type { WorkerRegistry } from '../workers/registry.js';
 
 export function getProject(db: ApiContext['db'] | DbTransaction, projectId: string): Project {
-  const project = db.select().from(projects).where(eq(projects.id, projectId)).get();
+  const project = db.select(projectFields).from(projects).where(eq(projects.id, projectId)).get();
   if (!project) throw new ApiError(404, 'project_not_found', 'Project was not found');
   return project;
 }
@@ -27,7 +27,7 @@ export function requireReadyProject(
 
 export function listProjects(context: ApiContext): Project[] {
   return context.db
-    .select()
+    .select(projectFields)
     .from(projects)
     .orderBy(asc(projects.createdAt), asc(projects.name))
     .all();

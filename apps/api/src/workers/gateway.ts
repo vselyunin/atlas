@@ -54,6 +54,8 @@ export function registerGateway(
   app.route({
     method: 'GET',
     url: WORKER_CONNECT_PATH,
+    // The Worker authenticates with its token below, independent of sign-in.
+    config: { access: 'worker' },
     preHandler(request, _reply, done) {
       if (!request.ws) return done(new ApiError(404, 'not_found', 'Unknown route'));
       if (request.headers.origin !== undefined)

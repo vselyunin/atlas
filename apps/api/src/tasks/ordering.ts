@@ -1,7 +1,7 @@
 import type { Task, TaskStatus } from '@atlas/contracts';
 import { and, asc, eq } from 'drizzle-orm';
 import type { DbTransaction } from '../db/client.js';
-import { tasks } from '../db/schema.js';
+import { taskFields, tasks } from '../db/schema.js';
 
 export function readColumn(
   tx: DbTransaction,
@@ -10,7 +10,7 @@ export function readColumn(
   status: TaskStatus,
 ) {
   return tx
-    .select()
+    .select(taskFields)
     .from(tasks)
     .where(
       and(eq(tasks.projectId, projectId), eq(tasks.versionId, versionId), eq(tasks.status, status)),

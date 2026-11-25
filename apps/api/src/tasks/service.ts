@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Task, TaskCreate, TaskMove, TaskPatch } from '@atlas/contracts';
 import { and, asc, eq } from 'drizzle-orm';
 import type { ApiContext, DbTransaction } from '../db/client.js';
-import { tasks, workers } from '../db/schema.js';
+import { taskFields, tasks, workers } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { requireReadyProject } from '../projects/service.js';
 import { requireVersion } from '../versions/service.js';
@@ -15,7 +15,7 @@ function requireAssignee(db: DbTransaction, id: string | null | undefined) {
 }
 
 function requireCurrentTask(tx: DbTransaction, taskId: string, expectedRevision: number): Task {
-  const task = tx.select().from(tasks).where(eq(tasks.id, taskId)).get();
+  const task = tx.select(taskFields).from(tasks).where(eq(tasks.id, taskId)).get();
   if (!task) throw new ApiError(404, 'task_not_found', 'Task was not found');
   requireReadyProject(tx, task.projectId);
   if (task.revision !== expectedRevision) {
@@ -28,7 +28,7 @@ export function listTasks({ db }: ApiContext, projectId: string, versionId: stri
   requireReadyProject(db, projectId);
   requireVersion(db, projectId, versionId);
   return db
-    .select()
+    .select(taskFields)
     .from(tasks)
     .where(and(eq(tasks.projectId, projectId), eq(tasks.versionId, versionId)))
     .orderBy(asc(tasks.status), asc(tasks.position))

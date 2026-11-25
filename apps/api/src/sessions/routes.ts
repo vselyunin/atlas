@@ -4,6 +4,7 @@ import { ApiError } from '../http/errors.js';
 import type { SessionHub } from './hub.js';
 
 // Spike: the Board attaches to a task's agent terminal over this socket.
+// The route has no `access` value, so with sign-in on the upgrade requires a session.
 export function registerSessionRoutes(
   app: FastifyInstance,
   hub: SessionHub,
