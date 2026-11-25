@@ -147,28 +147,30 @@ Checked against GitHub's documentation on 2026-11-25:
 - After installation GitHub sends the browser only to the App's "Setup URL".
   The installation ID in that redirect can be forged and must not be trusted.
 
-Not settled by the documentation. The first step of the plan tests these live,
-with the user at the browser, before anything is built on them:
+Tested live on 2026-11-25, with the user at the browser, against a throwaway
+App (`Atlas-check-…`, owned by the user's personal account, installed on one
+test repository):
 
-1. Whether the manifest flow accepts `http://localhost` addresses for its
-   redirect, callback and setup URLs. GitHub's own sign-in tutorial uses one;
-   the manifest page shows only `https`.
-2. Whether an App can be created with webhooks inactive and no webhook URL.
-   Try a manifest without the webhook section first.
-3. Who can sign in through a non-public App owned by a personal account. The
-   expectation is: only that account.
-4. Whether GitHub lets the API revoke an installation token before it expires
-   (`DELETE /installation/token`, from memory).
-5. Whether a push from an App without the "Workflows" right is rejected when
-   the branch changes files under `.github/workflows` (expected: yes). This one
-   only needs noting for the push iteration.
-
-If 1 fails, the fallback is manual registration: the setup page shows the exact
-values to enter on GitHub, and the owner types the App ID, client ID and client
-secret into the setup page and uploads the key file there. If 2 fails, register
-an inactive webhook with a placeholder address; if GitHub demands a reachable
-one, stop and raise it with the user. If 4 fails, tokens simply live out their
-hour and the known limit stays.
+1. The manifest flow accepts `http://localhost` addresses. GitHub redirected to
+   `http://localhost:5173` after creating the App, and again to the Setup URL
+   after installation. Setup uses the manifest flow; the manual registration
+   fallback is not built.
+2. An App can be created from a manifest with no webhook section. The App came
+   back with the three rights (`contents: write`, `pull_requests: write`,
+   `metadata: read`) and no events.
+3. The account that owns the App signed in through it (PKCE, no scopes).
+   Sign-in from a second GitHub account was not tried, so "only that account"
+   remains the documented expectation, not a tested fact. Atlas does not rely
+   on it: a person signs in only when their GitHub ID is the owner's or a
+   member's.
+4. GitHub lets the API revoke an installation token early. A token minted for
+   one repository with `contents: read` answered 200,
+   `DELETE /installation/token` answered 204, and the same token then
+   answered 401.
+5. Not tested this iteration: whether a push from an App without the
+   "Workflows" right is rejected when the branch changes files under
+   `.github/workflows` (expected: yes). It only matters for the push
+   iteration.
 
 ## Design
 
