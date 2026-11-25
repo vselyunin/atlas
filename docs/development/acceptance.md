@@ -95,8 +95,11 @@ Codex was not checked under the sandbox and is unverified.
 
 Status: not yet run. The automated tests for sign-in and setup use a local stand-in for GitHub
 and never reach github.com, so only these steps cover the real service. They need a GitHub
-account that may create Apps, one test repository, and for steps 8 to 10 a second GitHub
-account. Use a fresh database, for example by starting with an unused `ATLAS_DB_PATH` and
+account that may create Apps and one test repository. Steps 8 to 10 need a second GitHub
+account, and for them to work the App must be owned by an organization, created by choosing that
+organization on the setup page, with the second account a member of it. GitHub is expected, but
+was not tested, to refuse a second account on a personal App before Atlas sees it. With a
+personal App, record "GitHub refused the account" as the outcome of step 8 and skip steps 9 and 10. Use a fresh database, for example by starting with an unused `ATLAS_DB_PATH` and
 `ATLAS_GITHUB_APP_FILE`. Do not write down the owner code, the App file's content or any token.
 
 1. Run `pnpm dev:web` and open <http://localhost:5173>. Expected: only the setup page shows, with
@@ -108,13 +111,14 @@ account. Use a fresh database, for example by starting with an unused `ATLAS_DB_
    no Workflows, no webhook, no events, not public.
 4. Choose "Install the App on GitHub" and select only the test repository. Expected: GitHub
    returns to the Board.
-5. Choose "Sign in with GitHub". Expected: you are signed in as the owner; your name and avatar
-   show in the header.
-6. Open Settings. Expected: the App's name and owning account, and a member list with only you.
+5. Choose "Sign in with GitHub". Expected: you are signed in as the owner; your avatar
+   shows in the header, and your name in the user menu.
+6. Open Settings from the user menu. Expected: the App's name and owning account, and a member list with only you.
 7. Reload the page. Expected: still signed in. Sign out from the user menu. Expected: the sign-in
    page shows.
 8. Sign in with the second account. Expected: the Board says that account has no access and
-   names it.
+   names it. With a personal App, GitHub may refuse the account first; record that and skip
+   steps 9 and 10.
 9. Sign in as the owner, add the second account's login in Settings, then sign in with the
    second account in another browser. Expected: it gets in, and has no member list or setup
    rights.
@@ -124,7 +128,9 @@ account. Use a fresh database, for example by starting with an unused `ATLAS_DB_
 11. Restart the API with `ATLAS_AUTH=off`. Expected: no sign-in, and a permanent "Sign-in is off"
     notice on the Board. Restart with sign-in on again. Expected: the sign-in page.
 12. Stop Atlas, delete the App file and the App on GitHub, and start again. Expected: the setup
-    page returns; the owner stays signed in and can create a new App.
+    page returns; the owner stays signed in and can create a new App. After that the Board goes
+    straight to the app with no install step; choose repositories from Settings ("Choose
+    repositories").
 13. Start again from a fresh database and App file. Create the App and install it, but do not
     sign in. Restart the API and read the owner code from its output. In a different browser,
     enter it on the setup page, then sign in. Expected: that browser becomes the owner. Without

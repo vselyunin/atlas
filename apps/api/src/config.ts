@@ -62,7 +62,7 @@ function resolveAuth(auth: AuthOptions | undefined): ResolvedAuthOptions | undef
       auth.ownerCodeSink ??
       ((code) =>
         process.stdout.write(
-          `Atlas owner code (enter it on the sign-in page to become the owner): ${code}\n`,
+          `Atlas owner code (enter it on the setup page to become the owner): ${code}\n`,
         )),
   };
 }

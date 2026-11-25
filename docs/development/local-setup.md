@@ -83,8 +83,8 @@ Read these before you choose the account on the setup page.
    names are unique across GitHub; you can change it. Confirm to create the App. Finish within
    one hour; GitHub allows no longer.
 4. GitHub returns you to the Board. Atlas checks with GitHub that the App is not public and has
-   only the rights it asked for, then writes the App file. If a check fails, nothing is stored
-   and the Board says why.
+   only the rights it asked for, then writes the App file. If a check fails, Atlas stores nothing
+   and the Board says why, but the App already exists on GitHub; see below.
 5. Choose "Install the App on GitHub" and pick the repositories the App may use. Atlas uses no
    repository this iteration, but the choice is the account's limit for what comes next. GitHub
    returns you to the Board.
@@ -96,9 +96,11 @@ It does not ask for Workflows, has no webhook and subscribes to no events. Conte
 requests are requested now so that you do not have to approve a wider right on GitHub later;
 nothing in Atlas uses them yet. Sign-in itself grants no repository right.
 
-If setup fails after GitHub already created the App, for example because Atlas could not write
-the file, the App exists on GitHub but Atlas has forgotten it. Delete the App named like
-`Atlas-xxxxxx` in your GitHub settings (Developer settings, GitHub Apps) before you try again.
+If setup fails after GitHub already created the App, the App exists on GitHub but Atlas has
+forgotten it. This happens when the App turns out to be public, when its rights differ from what
+Atlas asked for, when GitHub fails after creating it, and when Atlas could not write the file.
+Delete the App named like `Atlas-xxxxxx` in your GitHub settings (Developer settings, GitHub
+Apps) before you try again; an organization's App is under the organization's settings instead.
 Otherwise it stays there with its keys.
 
 If you finish in another browser, or lose the cookie, nobody becomes the owner by signing in.
@@ -147,7 +149,8 @@ needs the owner's session.
 | `ATLAS_GIT_HOST_URL`    | Worker. The Git host the Worker uses for GitHub repositories. Default `https://github.com`; `http` is accepted only for a loopback address. `pnpm dev` passes it to the container. Atlas does not use it for sign-in; later work on repositories does. |
 
 If you change `ATLAS_BOARD_ORIGIN`, GitHub still holds the old addresses. In the App's settings
-on GitHub (Settings, Developer settings, GitHub Apps, your App) update the homepage URL, the
+on GitHub (Settings, Developer settings, GitHub Apps, your App; for an organization's App, the
+organization's settings) update the homepage URL, the
 callback URL (`<Board origin>/api/v1/auth/github/callback`) and the setup URL
 (`<Board origin>/?github=installed`). Until you do, sign-in returns to the old address.
 
@@ -183,9 +186,10 @@ Removal is manual.
 1. Stop Atlas.
 2. Delete the App file.
 3. Delete the App on GitHub: Settings, Developer settings, GitHub Apps, the App, Advanced,
-   Delete. Without this the App and its keys stay valid on GitHub.
+   Delete (for an organization's App, start from the organization's settings). Without this the App and its keys stay valid on GitHub.
 4. Start Atlas again. Setup runs again, as described above, except that the owner must be
-   signed in to run it, and nobody else can.
+   signed in to run it, and nobody else can. This holds once an owner exists; if setup never got
+   as far as an owner, it is open as on a first run.
 
 What stays: the users, members and their sessions, and all projects and tasks, remain in the
 database. The owner stays signed in and can run setup again without a mark or code. Until setup

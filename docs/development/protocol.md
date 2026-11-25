@@ -118,12 +118,12 @@ With sign-in on, every HTTP route and the Board session socket need a session, e
 
 Cookies, all `HttpOnly` and `SameSite=Lax`, and `Secure` when the Board origin is `https`:
 
-| Cookie              | Holds                                               | Lifetime                                |
-| ------------------- | --------------------------------------------------- | --------------------------------------- |
-| `atlas_session`     | Random session ID; the database keeps only its hash | 30 days from last use                   |
-| `atlas_signin`      | Sign-in `state` and PKCE verifier                   | 10 minutes                              |
-| `atlas_setup_state` | Binds a setup `state` to the browser                | 1 hour                                  |
-| `atlas_setup_mark`  | Lets this browser's first sign-in become the owner  | 30 days; the API ends it with the owner |
+| Cookie              | Holds                                               | Lifetime                                                                                             |
+| ------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `atlas_session`     | Random session ID; the database keeps only its hash | 30 days from last use; the cookie is kept for 400 days so the browser does not drop a session in use |
+| `atlas_signin`      | Sign-in `state` and PKCE verifier                   | 10 minutes                                                                                           |
+| `atlas_setup_state` | Binds a setup `state` to the browser                | 1 hour                                                                                               |
+| `atlas_setup_mark`  | Lets this browser's first sign-in become the owner  | 30 days; the API ends it with the owner                                                              |
 
 The two callbacks carry a code and `state` in their query string. The API omits that query string from its request log and answers every outcome with a redirect to the Board, reporting the result in the Board's address (`?setup=created`, `?setup=failed&reason=…`, `?signin=failed&reason=…&login=…`). A `state` works once and expires: one hour for setup, 10 minutes for sign-in. Pending values live in memory, so an API restart cancels them. Setup is refused with 409 `setup_done` while the App file exists.
 
