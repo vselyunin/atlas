@@ -359,7 +359,7 @@ export async function cloneRepository(
       return finish(
         failure(
           'repository_renamed',
-          `The repository ${repository} is now ${credential.repository}. Link the project again. ${preserved}`,
+          `The repository ${repository} is now ${credential.repository}. Create the project again from the repository's new name, with another folder or after removing this one. ${preserved}`,
         ),
       );
     }
