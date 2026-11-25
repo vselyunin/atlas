@@ -300,9 +300,9 @@ A new API setting, `ATLAS_AUTH`, takes `github` (the default) or `off`.
   off. The server entry point always reads the setting, so a started server has
   sign-in on unless the setting says otherwise.
 
-This is the author's call and needs the user's decision; see "Tests". Its
-purpose is to keep the existing tests, which call the API without signing in,
-unchanged. It follows the precedent of `ATLAS_AGENT_SANDBOX=off`.
+The user chose this on 2026-11-25 over making every existing test sign in; see
+"Tests". Its purpose is to keep the existing tests, which call the API without
+signing in, unchanged. It follows the precedent of `ATLAS_AGENT_SANDBOX=off`.
 
 ### Linking a project to a repository
 
@@ -435,15 +435,23 @@ files.
 
 Required sign-in would break every existing test that calls the API, and the
 end-to-end helper `scripts/e2e-server.mjs`, which starts the real server. The
-proposal is:
+user decided:
 
 - Existing tests that build the API in code keep working unchanged, because
   `buildApp` without sign-in options runs with sign-in off.
 - `scripts/e2e-server.mjs` gets one added line, `ATLAS_AUTH: 'off'`, in its
-  environment. This needs the user's permission.
+  environment. The user gave permission for exactly this change on 2026-11-25.
+  It covers no other edit to that file or to any other existing test file.
 
-The alternative is to make every existing test sign in, which means editing
-most existing test files.
+The rejected alternative was to make every existing test sign in, which means
+editing most existing test files.
+
+Existing tests therefore prove the functions work with sign-in off, and cannot
+notice a route left unprotected. A new test closes that gap: with sign-in on and
+no session, it requests every route the API has registered and expects each to
+be refused, apart from the listed exceptions. It reads the routes from the
+running API, so a route added later is covered without anyone remembering to
+add it.
 
 If the new capability or command kind makes an existing contract test fail, for
 example one that lists the accepted capability sets, stop and ask the user,
