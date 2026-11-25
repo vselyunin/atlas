@@ -106,7 +106,8 @@ Otherwise it stays there with its keys.
 
 If you finish in another browser, or lose the cookie, nobody becomes the owner by signing in.
 Atlas does not let the first sign-in win. Instead, the API prints a one-time owner code on its
-standard output each time it starts, while the App file exists and no owner does. Under
+standard output each time it starts, while the App file exists and no owner does (and, for a
+reconnect, while an owner exists and the App file is missing; see "Remove the connection"). Under
 `pnpm dev` it is in the terminal that runs the stack. Enter it on the setup page ("Use owner
 code") in the browser you want, then sign in. The code is created only when the API starts, so
 restart the API to get a new one. It works once, and it and the cookie stop working as soon as
@@ -114,7 +115,8 @@ an owner exists. The cookie that marks the owner's browser lapses after 30 days.
 
 Setup of a fresh installation is open to whoever can reach the API. The API listens on loopback
 only, so that means a process on the same machine. Once an owner exists, every setup request
-needs the owner's session.
+needs the owner's session, with one exception: while the App file is missing, the owner code
+printed at start opens setup again (see "Remove the connection").
 
 ### Sign-in, members and sessions
 
@@ -188,23 +190,47 @@ Removal is manual.
 2. Delete the App file.
 3. Delete the App on GitHub: Settings, Developer settings, GitHub Apps, the App, Advanced,
    Delete (for an organization's App, start from the organization's settings). Without this the App and its keys stay valid on GitHub.
-4. Start Atlas again. Setup runs again, as described above, except that the owner must be
-   signed in to run it, and nobody else can. This holds once an owner exists; if setup never got
-   as far as an owner, it is open as on a first run.
+4. Start Atlas again and create a new App. If setup never got as far as an owner, setup is open
+   as on a first run. Once an owner exists, there are two ways in:
+   - A browser where the owner is still signed in shows the setup page and runs setup as on a
+     first run.
+   - Any other browser shows "Reconnect Atlas to GitHub". The API prints an owner code at start
+     while an owner exists and the App file is missing; the line says that the GitHub connection
+     is missing. Under `pnpm dev` it is in the terminal that runs the stack. Enter it there ("Use
+     owner code"), then create the App. This is the way back when the owner's session is gone, for
+     example after 30 idle days, cleared cookies or another browser or machine.
+5. Install the new App on your repositories, then sign in. The owner signs in with their own
+   GitHub account as before, and members do too.
+
+The owner code works the same way as on a first run: it is random, only its hash is stored, it
+works once, and only the API's start creates one, so restart the API to get a new one. It is
+printed only on that start; it never appears in a response or the request log. Entering it gives
+the browser the cookie `atlas_setup_reconnect`, which lets it run setup; it ends when the App file
+is written and lapses after one day. It never makes anyone the owner: the owner stays the account
+recorded in the database, bound by its GitHub account number, and anyone else who signs in is
+admitted only as a member the owner added. With an owner and an App file, no code is printed and
+the setup routes need the owner's session. Anyone who can read the API's output can therefore
+connect a new App, the same trust the first-run code relies on.
 
 What stays: the users, members and their sessions, and all projects and tasks, remain in the
-database. The owner stays signed in and can run setup again without a mark or code. Until setup
-is done, every route that needs a session answers 409 `setup_required`, and the Board shows the
-setup page. Sessions do not depend on the App file, so signed-in people stay signed in, and
-members stay bound to their account numbers. Atlas has no way to change the owner; starting with
-no users means deleting the database, which also deletes projects and tasks.
+database. Until setup is done, every route that needs a session answers 409 `setup_required`, and
+the Board shows the setup page. Sessions do not depend on the App file, so signed-in people stay
+signed in, and members stay bound to their account numbers. Links keep their repository IDs; the
+new App must be installed on those repositories for them to work. Atlas has no way to change the
+owner; starting with no users means deleting the database, which also deletes projects and tasks.
 
 ### Known limits of sign-in and setup
 
-- The check that keeps the App file out of a Worker's workspace root compares paths as the API
-  sees them. A Worker in a Docker container reports container paths, so the check cannot see the
-  Worker's side. Keep the App file out of the folder that `pnpm dev` mounts into the container
-  yourself.
+- The check that keeps the App file out of a Worker's workspace root compares the App file's path,
+  as the API sees it, with the workspace root each registered Worker reported. `pnpm dev` mounts
+  the workspace and the Worker state directory into the container at the same paths as on the
+  host, so for `pnpm dev` the check compares the right paths. It cannot see the file when a
+  container mounts the workspace at another path than the host's, when the same folder is
+  reached by two different paths (for example `/mnt/c` names that differ only in letter case,
+  because the comparison is case-sensitive), or for a Worker that has not registered yet. It
+  does not check the Worker state directory. Keep the App file out of both folders yourself.
+- A browser without the owner's session sees "Reconnect Atlas to GitHub" after the connection
+  was removed. It needs the owner code from the API's output; nothing on the page can produce one.
 - The API is meant to listen on loopback. Pending sign-ins and setups are held in memory, capped
   (100 sign-ins, 50 setups), and lost when the API restarts; start again if you restart in the
   middle.
@@ -357,10 +383,14 @@ a token the Worker cannot use fails with `invalid_credential`.
   flaws needed. The image's Git (2.39.5 when checked) carries the fixes for the known ones, see
   `docker/worker/README.md`; rebuilding the image picks up later Debian fixes. Check the
   version again when you rebuild.
-- The check that keeps the App file out of a Worker's workspace root compares paths as the API sees
-  them, and only for Workers already registered in its database. A Docker Worker reports container
-  paths and so cannot be checked against its host mounts. Keep the App file out of the folder
-  `pnpm dev` mounts yourself.
+- The check that keeps the App file out of a Worker's workspace root runs at start and at every
+  grant, only for Workers registered in the API's database. For `pnpm dev` it compares the right
+  paths, because the container sees the workspace at the host's path; for other cases see "Known
+  limits of sign-in and setup".
+- Stopping or restarting the API while a clone runs revokes the clone's token, so Git's next
+  request to GitHub fails and the clone ends `git_failed`; the project is `failed` and its folder
+  stays. In development `pnpm dev` runs the API under a file watcher, so saving an API source file
+  restarts it and has the same effect. Let a clone finish before you stop or change the API.
 - A second clone queued behind a clone that runs longer than 15 minutes is refused with
   `grant_window_closed`: the window counts from the send, and the Worker runs commands one at a
   time. The refused clone's folder remains on the Worker, so create the project again after the

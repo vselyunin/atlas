@@ -285,6 +285,7 @@ sign-in page accepts it in place of the mark. There is no "first sign-in wins".
 If the database already has an owner, every setup endpoint requires that
 owner's session. Sessions do not depend on the App file, so the owner stays
 signed in across removal and can run setup again; nobody else can.
+(amended — see Amendments after approval)
 
 Setup of a fresh installation is open to whoever can reach the API, which today
 means a process on the same machine, because the API listens on loopback only.
@@ -772,9 +773,13 @@ list and an approved section disagree, the built behaviour is the one listed her
   The code is created only at API start.
 - The App file's workspace check runs at API start and at every credential grant, as
   approved, but it compares the paths the API sees and only for Workers already
-  registered in its database. A Docker Worker reports container paths, and a Worker
-  that registers after the start is not checked until a grant, so the check does not
-  cover those cases (see the setup guide's known limits).
+  registered in its database. A Worker that registers after the start is not checked
+  until a grant. `pnpm dev` mounts the workspace and state directories into the
+  container at the host's paths, so its Worker reports paths the check can compare; a
+  container that mounts the workspace at another path, or the same folder reached by
+  two different paths, is not covered, and the state directory is not checked (see the
+  setup guide's known limits). An earlier version of this amendment said a Docker
+  Worker always reports container paths; that was wrong for `pnpm dev`.
 - The 15-minute window limits only when a token may be issued, counted from the latest
   dispatch. A granted token is revoked at the command's result, at the Worker's Git
   time limit after the grant (two 30-minute processes and a minute's margin), when a
@@ -817,3 +822,22 @@ list and an approved section disagree, the built behaviour is the one listed her
   determined after the fetch fails `default_branch_unknown`; a token with characters
   Git cannot carry fails `invalid_credential`. Each failure leaves the folder, like
   any other failed clone.
+- Reconnect without the owner's session. The approved text required the owner's
+  session for setup once an owner exists. After the App file is removed, an owner
+  whose session is gone (30 idle days, cleared cookies, another browser) could then
+  neither sign in, which needs the App, nor run setup; the only way back was deleting
+  the database. Reason for the change: the final review (finding I-1) found this dead
+  end, and the documented response to a leaked App file leads straight into it. Built
+  behaviour: when the API starts with an owner and no App file, it prints a one-time
+  owner code, as on a first run and with the same properties (random, hash stored,
+  one use, new code only at start). Entering it on the setup page gives the browser a
+  reconnect mark (`atlas_setup_reconnect`, one day, ended when the App file is written)
+  that opens the setup routes, so a new App can be created. It never creates, replaces
+  or changes the owner: the owner signs in by their GitHub account number as before,
+  and anyone else is admitted only as an added member. `GET /auth/state` reports the
+  new value `reconnect` to a browser that may not run setup yet, and the Board shows
+  the code entry there instead of a start button that would answer 401. With an owner
+  and an App file nothing changes.
+- Stopping or restarting the API revokes the tokens it holds, as approved, so a clone
+  still fetching then fails `git_failed`. In development the API runs under a file
+  watcher, so any API source change does this.
