@@ -1,23 +1,17 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  GithubConnectionResponseSchema,
-  MemberListResponseSchema,
-  MemberResponseSchema,
-} from '@atlas/contracts';
-import type { Member, User } from '@atlas/contracts';
+import { MemberListResponseSchema, MemberResponseSchema } from '@atlas/contracts';
+import type { Member, Project, User } from '@atlas/contracts';
 import { Dialog } from '../../components/ui/dialog';
 import { NoContent, errorMessage, request } from '../../lib/api';
 import { isWebUrl } from '../../lib/auth';
+import { useGithubConnection } from '../../lib/queries';
+import { GithubLink } from '../projects/GithubLink';
 
 const membersKey = ['members'] as const;
 
 function Connection() {
-  const connection = useQuery({
-    queryKey: ['github', 'connection'],
-    queryFn: ({ signal }) =>
-      request('/github/connection', GithubConnectionResponseSchema, { signal }),
-  });
+  const connection = useGithubConnection();
   return (
     <section aria-labelledby="settings-connection">
       <h3 id="settings-connection">GitHub connection</h3>
@@ -151,7 +145,16 @@ function Members({ currentUserId }: { currentUserId: string }) {
   );
 }
 
-export function SettingsDialog({ user, onClose }: { user: User; onClose: () => void }) {
+export function SettingsDialog({
+  user,
+  project,
+  onClose,
+}: {
+  user: User;
+  // The project selected on the Board, if any.
+  project?: Project;
+  onClose: () => void;
+}) {
   return (
     <Dialog
       title="Settings"
@@ -160,6 +163,7 @@ export function SettingsDialog({ user, onClose }: { user: User; onClose: () => v
     >
       <div className="settings-sections">
         <Connection />
+        <GithubLink project={project} />
         {user.role === 'owner' && <Members currentUserId={user.id} />}
       </div>
     </Dialog>

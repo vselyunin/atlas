@@ -74,7 +74,7 @@ export function App() {
         onCreateProject={() => setDialog('project')}
         onCreateVersion={() => setDialog('version')}
         onCreateTask={() => createTask()}
-        user={authUser ? <UserMenu user={authUser} /> : undefined}
+        user={authUser ? <UserMenu user={authUser} project={project} /> : undefined}
       />
       <main className="main-content" aria-label="Project board">
         {error && (

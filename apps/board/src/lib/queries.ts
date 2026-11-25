@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  GithubConnectionResponseSchema,
+  GithubLinkResponseSchema,
+  GithubRepositoryListResponseSchema,
   ProjectListResponseSchema,
   VersionListResponseSchema,
   TaskListResponseSchema,
@@ -32,6 +35,29 @@ export function useTasks(projectId: string, versionId: string, ready: boolean) {
         signal,
       }),
     enabled: !!projectId && !!versionId && ready,
+  });
+}
+export function useGithubConnection() {
+  return useQuery({
+    queryKey: ['github', 'connection'],
+    queryFn: ({ signal }) =>
+      request('/github/connection', GithubConnectionResponseSchema, { signal }),
+  });
+}
+export function useGithubRepositories() {
+  return useQuery({
+    queryKey: ['github', 'repositories'],
+    queryFn: ({ signal }) =>
+      request('/github/repositories', GithubRepositoryListResponseSchema, { signal }),
+  });
+}
+export const githubLinkKey = (projectId: string) => ['github', 'link', projectId] as const;
+export function useGithubLink(projectId: string) {
+  return useQuery({
+    queryKey: githubLinkKey(projectId),
+    queryFn: ({ signal }) =>
+      request(`/projects/${projectId}/github-link`, GithubLinkResponseSchema, { signal }),
+    enabled: !!projectId,
   });
 }
 export function useWorkers() {

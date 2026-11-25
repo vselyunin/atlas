@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { User } from '@atlas/contracts';
+import type { Project, User } from '@atlas/contracts';
 import { NoContent, errorMessage, request } from '../../lib/api';
 import { authKey } from '../../lib/auth';
 import { AppearanceRow } from '../layout/BoardHeader';
 import { SettingsDialog } from './SettingsDialog';
 
-export function UserMenu({ user }: { user: User }) {
+export function UserMenu({ user, project }: { user: User; project?: Project }) {
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -75,7 +75,9 @@ export function UserMenu({ user }: { user: User }) {
           </Popover.Content>
         </Popover.Portal>
       </Popover.Root>
-      {settings && <SettingsDialog user={user} onClose={() => setSettings(false)} />}
+      {settings && (
+        <SettingsDialog user={user} project={project} onClose={() => setSettings(false)} />
+      )}
     </>
   );
 }
