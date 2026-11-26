@@ -404,23 +404,19 @@ export async function cloneRepository(
     // Without the token: record origin, then check out the default branch with hooks off.
     const local = { cwd: target, env, signal: context.signal, timeoutMs: LOCAL_TIME_LIMIT_MS };
     await runGit(git, withConfig(localConfig, ['remote', 'add', 'origin', address.href]), local);
-    const branches = (
-      await runGit(
-        git,
-        withConfig(localConfig, [
-          'for-each-ref',
-          '--format=%(refname:lstrip=3)',
-          'refs/remotes/origin/',
-        ]),
-        local,
-      )
-    )
-      .split('\n')
-      .filter(Boolean);
+    // At most one line each: a repository can have more branches than the kept output holds.
+    const firstRef = async (pattern: string) =>
+      (
+        await runGit(
+          git,
+          withConfig(localConfig, ['for-each-ref', '--count=1', '--format=%(refname)', pattern]),
+          local,
+        )
+      ).trim();
     const branch = defaultBranch(head);
     const usable = (name: string | null): name is string =>
       name !== null && !name.startsWith('-') && !name.includes('..');
-    if (branches.length === 0) {
+    if ((await firstRef('refs/remotes/origin/')) === '') {
       // An empty repository: nothing to check out. Point HEAD at the host's default if known.
       if (usable(branch))
         await runGit(
@@ -429,7 +425,9 @@ export async function cloneRepository(
           local,
         );
     } else {
-      if (!usable(branch) || !branches.includes(branch)) {
+      const fetched = async (name: string) =>
+        (await firstRef(`refs/remotes/origin/${name}`)) === `refs/remotes/origin/${name}`;
+      if (!usable(branch) || !(await fetched(branch))) {
         return finish(
           failure('default_branch_unknown', `Could not tell the default branch. ${preserved}`),
         );
