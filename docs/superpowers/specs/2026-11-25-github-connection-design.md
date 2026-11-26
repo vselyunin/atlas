@@ -802,10 +802,6 @@ list and an approved section disagree, the built behaviour is the one listed her
   `github_unavailable`. The approved text gave no status. The Board never calls the
   connection route with sign-in off, while the other routes were given a clear answer
   because the Board's project views can reach them.
-- With sign-in off, a create that carries `githubRepositoryId` ignores the field and
-  initializes an empty repository. The plan said 409 `github_unavailable`; changing it
-  needs permission to change an existing test. This is the current behaviour and it is
-  under review.
 - A clone still queued when the Worker stops is not started and gets no result; the
   API sends it again when the Worker registers again. The approved text said it is
   `needs_attention` on the next start, which holds for a clone that was running.

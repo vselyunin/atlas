@@ -216,7 +216,10 @@ export function createProject(
     );
   }
   const { githubRepositoryId } = repository;
-  // With sign-in off there is no GitHub App, and the field is ignored as before cloning existed.
+  if (githubRepositoryId !== undefined && !github) {
+    // With sign-in off there is no GitHub App to clone with; refuse instead of creating an empty repository.
+    throw new ApiError(409, 'github_unavailable', 'GitHub is not available while sign-in is off');
+  }
   if (githubRepositoryId !== undefined && github) {
     return createClonedProject(
       context,

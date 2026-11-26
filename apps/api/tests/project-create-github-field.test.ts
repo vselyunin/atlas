@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type WebSocket from 'ws';
 import { randomUUID } from 'node:crypto';
-import { ProjectCreateResponseSchema, ProjectListResponseSchema } from '@atlas/contracts';
+import { ProjectListResponseSchema } from '@atlas/contracts';
 import { buildApp } from '../src/app.js';
 
 let app: FastifyInstance;
@@ -20,7 +20,7 @@ afterEach(async () => {
   await app.close();
 });
 
-it('keeps githubRepositoryId out of the stored project', async () => {
+it('refuses githubRepositoryId while sign-in is off and stores no project', async () => {
   socket = await app.injectWS('/api/v1/workers/connect', {
     headers: { host: 'localhost', authorization: 'Bearer test-token' },
   });
@@ -53,19 +53,12 @@ it('keeps githubRepositoryId out of the stored project', async () => {
       },
     },
   });
-  // Local provisioning answers 202.
-  expect(res.statusCode).toBe(202);
-  const { project } = ProjectCreateResponseSchema.parse(res.json<unknown>());
-  expect(project.repository).toEqual({
-    mode: 'local',
-    workerId: 'atlas:test',
-    relativePath: 'repo',
-    localPath: null,
-  });
+  // buildApp without sign-in options runs with sign-in off, so there is no GitHub App to clone with.
+  expect(res.statusCode).toBe(409);
+  expect(res.json<{ error: { code: string } }>().error.code).toBe('github_unavailable');
 
   const list = await app.inject('/api/v1/projects');
   expect(list.statusCode).toBe(200);
   const { items } = ProjectListResponseSchema.parse(list.json<unknown>());
-  expect(items).toHaveLength(1);
-  expect(items[0]?.repository).not.toHaveProperty('githubRepositoryId');
+  expect(items).toHaveLength(0);
 });

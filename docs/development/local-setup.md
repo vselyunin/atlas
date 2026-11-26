@@ -396,9 +396,8 @@ a token the Worker cannot use fails with `invalid_credential`.
   time. The refused clone's folder remains on the Worker, so create the project again after the
   first clone finishes, with another folder name or after removing that folder.
 - A clone that stays pending blocks unlinking its project, and there is no way to cancel it.
-- With sign-in off, a create request that carries `githubRepositoryId` currently ignores the field
-  and initializes an empty repository. This is the current behaviour and it is under review; the
-  Board does not offer the choice with sign-in off.
+- With sign-in off, a create request that carries `githubRepositoryId` is refused with 409
+  `github_unavailable` and nothing is created; the Board does not offer the choice with sign-in off.
 - A Worker run natively, or with `ATLAS_AGENT_SANDBOX=off`, runs its agents as your own account,
   which can read the environment of the Worker's Git processes while a clone runs.
 - All Workers share one token; whoever has it can register as an offline Worker and receive its
