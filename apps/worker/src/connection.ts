@@ -3,18 +3,27 @@ import { isDeepStrictEqual } from 'node:util';
 import WebSocket from 'ws';
 import type { RawData } from 'ws';
 import {
+  AGENT_SESSION_STATUS_CAPABILITY,
   ApiToWorkerMessageSchema,
   MAX_WS_FRAME_BYTES,
   RECONNECT_INITIAL_DELAY_MS,
   RECONNECT_MAX_DELAY_MS,
 } from '@atlas/contracts';
-import type { ApiToWorkerMessage, CommandDispatch, WorkerToApiMessage } from '@atlas/contracts';
+import type {
+  ApiToWorkerMessage,
+  CommandDispatch,
+  SessionExit,
+  WorkerToApiMessage,
+} from '@atlas/contracts';
 import type { WorkerConfig } from './config.js';
 import type { Journal } from './state/journal.js';
 import { cloneRepository } from './repositories/clone.js';
 import { CredentialExchange } from './repositories/credential.js';
 import { initializeRepository } from './repositories/initialize.js';
 import { SessionManager } from './sessions/manager.js';
+
+// session.sync carries at most this many exits; the oldest are dropped first.
+const MAX_MISSED_EXITS = 500;
 
 function text(data: RawData): string {
   if (Array.isArray(data)) return Buffer.concat(data).toString('utf8');
@@ -42,8 +51,17 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
     send({ ...envelope(), type: 'credential.request', commandId, payload: {} });
     return true;
   });
-  // Spike: output produced while disconnected is dropped.
-  const sessions = new SessionManager(config, (event) => send({ ...envelope(), ...event }));
+  // Exits the API could not be told about, sent in the next session.sync. Output produced while
+  // disconnected is dropped.
+  const missedExits: SessionExit['payload'][] = [];
+  const sessions = new SessionManager(config, (event) => {
+    if (event.type === 'session.exit' && !registered) {
+      missedExits.push(event.payload);
+      if (missedExits.length > MAX_MISSED_EXITS) missedExits.shift();
+      return;
+    }
+    send({ ...envelope(), ...event });
+  });
   const replay = () => {
     for (const entry of journal.entries()) {
       if (entry.outcome && !entry.acknowledged)
@@ -144,7 +162,12 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
           workerId: config.id,
           name: config.name,
           workspaceRoot: config.root,
-          capabilities: ['repository.init', 'agent.session', 'repository.clone'],
+          capabilities: [
+            'repository.init',
+            'agent.session',
+            'repository.clone',
+            AGENT_SESSION_STATUS_CAPABILITY,
+          ],
         },
       });
     });
@@ -169,6 +192,12 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
             send({ ...envelope(), type: 'worker.heartbeat', payload: { workerId: config.id } });
             replay();
           }, message.payload.heartbeatIntervalMs);
+          // First, so the API learns which sessions still run before anything else.
+          send({
+            ...envelope(),
+            type: 'session.sync',
+            payload: { sessions: sessions.snapshot(), exits: missedExits.splice(0) },
+          });
           replay();
           console.log(`Worker ${config.name} connected`);
         } else if (message.type === 'command.dispatch') {
