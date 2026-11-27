@@ -24,6 +24,23 @@ Pinned agent tools, installed globally:
 Git, bubblewrap, socat and ripgrep come from Debian bookworm. The system Git config sets
 `safe.directory = *` because the mounted workspace belongs to the host user.
 
+## Workspace ownership
+
+UID 1001 must be able to create folders in the mounted workspace and to change file permissions
+there: Git changes the mode of its lock file whenever it writes a repository's configuration
+(`git init`, `git remote add`, a tracking checkout). `safe.directory` does not help with that. A
+Windows drive mounted in WSL without the `metadata` option allows mode changes only to the mount's
+owner, so `git init` fails there for UID 1001 with
+`chmod on .../.git/config.lock failed: Operation not permitted`. The Worker checks this on the
+folder it has just made, refuses `repository.init` and `repository.clone` with
+`workspace_permissions`, removes the empty folder again and prints a warning at start. The remedies
+are host mount settings, described under "Workspace on a Windows drive" in
+`docs/development/local-setup.md`.
+
+The container is deliberately not run as the mount's owner. On such a drive that is root or the
+host user, and the agent sandbox is built on an unprivileged container user with no capabilities;
+`pnpm dev` keeps `--cap-drop ALL`, `no-new-privileges` and the `USER atlas` of the image.
+
 ## Git version and clone flaws
 
 Checked on 2026-11-25 for repository cloning: the image's Git is `2.39.5`, Debian package

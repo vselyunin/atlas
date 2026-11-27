@@ -200,6 +200,8 @@ The Worker journals terminal results and replays unacknowledged results after re
 
 The API redispatches unresolved commands with their original IDs after reconnect. The Worker uses command IDs to deduplicate delivery and consult its journal. Delivery is at least once with deduplication. If the Worker cannot safely determine the outcome after a filesystem interruption, it reports `needs_attention`.
 
+A Worker whose user may not change file permissions in its workspace fails `repository.init` and `repository.clone` with the error code `workspace_permissions`, removes the empty target folder it made and, for a clone, sends no `credential.request`. The code is new; the result's shape is unchanged, and the API and Board treat it like any other failure code. See "Workspace on a Windows drive" in `docs/development/local-setup.md`.
+
 ### Capabilities
 
 A Worker registers with `["repository.init"]`, `["repository.init","agent.session"]` or `["repository.init","agent.session","repository.clone"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it. The third form was added with cloning.

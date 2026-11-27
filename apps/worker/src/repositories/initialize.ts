@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir } from 'node:fs/promises';
+import { lstat, mkdir, rmdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import type { CommandOutcome, RepositoryInitCommand } from '@atlas/contracts';
@@ -8,18 +8,48 @@ import { childEnvironment } from '../git-environment.js';
 import type { JournalEntry } from '../state/journal.js';
 import type { Journal } from '../state/journal.js';
 import { resolveTarget } from './paths.js';
+import {
+  canChangeMode,
+  WORKSPACE_PERMISSIONS_CODE,
+  workspacePermissionsMessage,
+} from './permissions.js';
+import type { ChangeMode } from './permissions.js';
 
 const run = promisify(execFile);
 export interface ExecutionContext {
   root: string;
   journal: Journal;
   git?: string;
+  /** Changes a mode; tests replace it to stand in for a workspace that refuses. */
+  changeMode?: ChangeMode;
   onAccepted?: () => void;
 }
 const failure = (code: string, message: string, attention = false): CommandOutcome => ({
   status: attention ? 'needs_attention' : 'failed',
   error: { code, message },
 });
+
+/**
+ * Refuses a target folder that was just made when the Worker may not change modes in it: Git
+ * could not write a configuration there. The empty folder is removed again so its name stays free.
+ * Returns null when the folder is usable.
+ */
+export async function refuseUnusableTarget(
+  target: string,
+  context: ExecutionContext,
+): Promise<CommandOutcome | null> {
+  if (await canChangeMode(target, context.changeMode)) return null;
+  const removed = await rmdir(target).then(
+    () => true,
+    () => false,
+  );
+  return failure(
+    WORKSPACE_PERMISSIONS_CODE,
+    `${workspacePermissionsMessage(context.root)} ${
+      removed ? 'No folder was created.' : `The empty folder ${target} could not be removed.`
+    }`,
+  );
+}
 
 export async function recoverCommand(
   entry: JournalEntry,
@@ -107,12 +137,17 @@ export async function initializeRepository(
     const info = await lstat(target);
     entry = { ...entry, stage: 'created', identity: { dev: info.dev, ino: info.ino } };
     context.journal.write(entry);
-    await run(context.git ?? 'git', ['init', '--quiet', '--', target], {
-      timeout: 30_000,
-      maxBuffer: 64 * 1024,
-      env: childEnvironment(context.root),
-    });
-    outcome = { status: 'succeeded', localPath: target };
+    const refusal = await refuseUnusableTarget(target, context);
+    if (refusal) {
+      outcome = refusal;
+    } else {
+      await run(context.git ?? 'git', ['init', '--quiet', '--', target], {
+        timeout: 30_000,
+        maxBuffer: 64 * 1024,
+        env: childEnvironment(context.root),
+      });
+      outcome = { status: 'succeeded', localPath: target };
+    }
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? String(error.code) : 'git_failed';
     outcome = failure(
