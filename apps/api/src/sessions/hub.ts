@@ -362,8 +362,8 @@ export class SessionHub {
       branch: session?.branch ?? null,
       worktreePath: session?.worktreePath ?? null,
       exitCode: session?.exitCode ?? null,
-      // Without a session the summary's message is the reason a start was refused.
-      message: session ? session.message : message,
+      // A refused start shows its reason; otherwise the session's own message.
+      message: session && reason !== 'not_started' ? session.message : message,
       status,
       reason,
       since,

@@ -158,6 +158,22 @@ describe('summarize', () => {
     }
   });
 
+  it('shows a start refused after a session ended over that ended session', () => {
+    const later = '2026-11-27T11:00:00.000Z';
+    expect(
+      status({
+        failedStart: { message: 'The project worker is offline', since: later },
+        session: session({ state: 'exited', exitCode: 0, message: 'Done' }),
+      }),
+    ).toEqual({
+      status: 'problem',
+      reason: 'not_started',
+      message: 'The project worker is offline',
+      exitCode: null,
+      since: later,
+    });
+  });
+
   it('prefers the session over a failed start and a missing checkout', () => {
     expect(
       status({

@@ -175,6 +175,35 @@ it('refuses a Worker too old to report session status', async () => {
   await expectNoStart(worker);
 });
 
+it('shows a refused start over an ended session until the task leaves Working', async () => {
+  const { worker, task } = await setup();
+  const board = await api.board(task.id);
+  const working = await move(task, 'working');
+  const { runId } = (await worker.next('session.start')).payload;
+  worker.send({
+    type: 'session.exit',
+    payload: { sessionId: task.id, runId, exitCode: 0, message: 'Done' },
+  });
+  await waitForStatus(board, 'ended');
+  await worker.close();
+  await waitOffline(worker.workerId);
+  const back = await move(await move(working, 'todo'), 'working');
+  const later = await api.board(task.id);
+  expect(await later.next('session')).toMatchObject({
+    state: 'exited',
+    status: 'problem',
+    reason: 'not_started',
+    message: 'The project worker is offline',
+  });
+  await move(back, 'todo');
+  expect(await waitForStatus(later, 'ended')).toMatchObject({
+    state: 'exited',
+    reason: 'exited',
+    message: 'Done',
+    exitCode: 0,
+  });
+});
+
 it('starts a new run when a task with an exited session moves back into Working', async () => {
   const { worker, task } = await setup();
   const board = await api.board(task.id);

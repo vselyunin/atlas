@@ -4,7 +4,12 @@ import { MAX_SESSION_PROMPT_CHARS } from '@atlas/contracts';
 import { BOARD_ORIGIN, createApi, until } from './support/session-harness.js';
 import type { BoardSocket, WorkerSocket } from './support/session-harness.js';
 
-const CAPABILITIES = ['repository.init', 'agent.session', 'agent.session.status'];
+const CAPABILITIES = [
+  'repository.init',
+  'agent.session',
+  'repository.clone',
+  'agent.session.status',
+];
 const WORKER = 'atlas:test';
 
 let api: Awaited<ReturnType<typeof createApi>>;
@@ -157,7 +162,7 @@ it('follows the Worker through started, output and exit', async () => {
     message: null,
     status: 'working',
     reason: 'working',
-    since: expect.any(String),
+    since: expect.any(String) as string,
   });
   workerMessage(worker, 'session.output', taskId, runId, { data: 'hello' });
   expect(await board.next('output')).toEqual({ type: 'output', data: 'hello' });
@@ -229,7 +234,7 @@ it('replays the current session and output to a Board that attaches mid-run', as
       message: null,
       status: 'working',
       reason: 'working',
-      since: expect.any(String),
+      since: expect.any(String) as string,
     },
     { type: 'output', data: 'one two' },
   ]);

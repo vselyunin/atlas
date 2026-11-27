@@ -25,16 +25,17 @@ export function summarize({
   workerOnline,
   hasCheckout,
 }: StatusInput): SessionSummary {
+  // A refusal is recorded only after the last start, so it is newer than an ended session.
+  if (failedStart && (!session || session.state === 'exited')) {
+    return {
+      status: 'problem',
+      reason: 'not_started',
+      message: failedStart.message,
+      exitCode: null,
+      since: failedStart.since,
+    };
+  }
   if (!session) {
-    if (failedStart) {
-      return {
-        status: 'problem',
-        reason: 'not_started',
-        message: failedStart.message,
-        exitCode: null,
-        since: failedStart.since,
-      };
-    }
     return {
       status: 'none',
       reason: hasCheckout ? 'none' : 'no_checkout',
