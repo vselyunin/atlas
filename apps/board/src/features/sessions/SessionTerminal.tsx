@@ -39,7 +39,6 @@ function terminalTheme() {
 export default function SessionTerminal({ taskId }: { taskId: string }) {
   const container = useRef<HTMLDivElement>(null);
   const control = useRef<{ send(message: BoardToApiSessionMessage): void; size(): void }>(null);
-  const terminalRef = useRef<Terminal>(null);
   const [connected, setConnected] = useState(false);
   const [info, setInfo] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +56,6 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
     terminal.loadAddon(fit);
     terminal.open(element);
     fit.fit();
-    terminalRef.current = terminal;
 
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${scheme}://${window.location.host}${taskSessionPath(taskId)}`);
@@ -119,7 +117,6 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
       socket.close();
       terminal.dispose();
       control.current = null;
-      terminalRef.current = null;
     };
   }, [taskId]);
 
@@ -133,7 +130,7 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
           {state === 'exited' && info?.exitCode !== null && ` (exit code ${info?.exitCode})`}
           {info?.branch && ` · ${info.branch}`}
         </p>
-        {active ? (
+        {active && (
           <button
             type="button"
             className="button"
@@ -141,21 +138,6 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
             onClick={() => control.current?.send({ type: 'stop' })}
           >
             Stop
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="button primary"
-            disabled={!connected}
-            onClick={() => {
-              const terminal = terminalRef.current;
-              if (!terminal) return;
-              setError(null);
-              control.current?.send({ type: 'start', cols: terminal.cols, rows: terminal.rows });
-              terminal.focus();
-            }}
-          >
-            {state === 'exited' ? 'Start again' : 'Start session'}
           </button>
         )}
       </div>
@@ -174,9 +156,7 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
           <p className="session-overlay">
             {!connected
               ? 'Not connected to the API. Hide and open the terminal to reconnect.'
-              : state === 'exited'
-                ? 'This session has ended. Choose Start again to run a new one.'
-                : 'No session is running. Choose Start session to launch the agent.'}
+              : 'This session is not running.'}
           </p>
         )}
       </div>

@@ -28,23 +28,45 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('loads the terminal on demand and closes the socket when hidden', async () => {
-  const user = userEvent.setup();
-  render(<TaskSession taskId="task:one" />);
-  expect(screen.getByRole('button', { name: 'Open terminal' })).toBeTruthy();
-  expect(sockets.sockets).toHaveLength(0);
+const running = {
+  type: 'session',
+  state: 'running',
+  branch: null,
+  worktreePath: null,
+  exitCode: null,
+  message: null,
+  status: 'working',
+  reason: 'working',
+  since: null,
+};
 
-  await user.click(screen.getByRole('button', { name: 'Open terminal' }));
+function renderPanel() {
+  render(<TaskSession taskId="task:one" taskStatus="working" />);
+  const panel = sockets.last();
+  act(() => panel.open());
+  act(() => panel.receive(running));
+  return panel;
+}
+
+it('loads the terminal on demand and closes its socket when hidden', async () => {
+  const user = userEvent.setup();
+  const panel = renderPanel();
+  expect(sockets.sockets).toHaveLength(1);
+  expect(panel.url.endsWith(taskSessionPath('task:one'))).toBe(true);
+
+  await user.click(screen.getByRole('button', { name: 'Connect' }));
   expect(await screen.findByRole('status')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Hide terminal' })).toBeTruthy();
   const socket = sockets.last();
+  expect(socket).not.toBe(panel);
   expect(socket.url.endsWith(taskSessionPath('task:one'))).toBe(true);
   expect(socket.closed).toBe(false);
 
   await user.click(screen.getByRole('button', { name: 'Hide terminal' }));
   expect(screen.queryByRole('status')).toBeNull();
-  expect(screen.getByRole('button', { name: 'Open terminal' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
   expect(socket.closed).toBe(true);
+  expect(panel.closed).toBe(false);
 });
 
 it('keeps Escape inside the terminal from closing a dialog, but not elsewhere', async () => {
@@ -53,10 +75,12 @@ it('keeps Escape inside the terminal from closing a dialog, but not elsewhere', 
   render(
     <Dialog title="Task" description="Task details" onClose={onClose}>
       <button type="button">Elsewhere</button>
-      <TaskSession taskId="task:one" />
+      <TaskSession taskId="task:one" taskStatus="working" />
     </Dialog>,
   );
-  await user.click(screen.getByRole('button', { name: 'Open terminal' }));
+  act(() => sockets.last().open());
+  act(() => sockets.last().receive(running));
+  await user.click(screen.getByRole('button', { name: 'Connect' }));
   await screen.findByRole('status');
   act(() => sockets.last().open());
 
