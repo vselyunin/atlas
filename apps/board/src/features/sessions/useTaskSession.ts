@@ -14,6 +14,8 @@ export function useTaskSession(taskId: string) {
   const [connected, setConnected] = useState(false);
   const [info, setInfo] = useState<SessionMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Counts error messages, so a repeated error text is still a new event.
+  const [errorCount, setErrorCount] = useState(0);
 
   useEffect(() => {
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -44,6 +46,7 @@ export function useTaskSession(taskId: string) {
         setError(null);
       } else if (message.type === 'error') {
         setError(message.message);
+        setErrorCount((count) => count + 1);
       }
     });
     return () => {
@@ -62,5 +65,5 @@ export function useTaskSession(taskId: string) {
     socket.send(JSON.stringify(message));
   }, []);
 
-  return { connected, info, error, start };
+  return { connected, info, error, errorCount, start };
 }

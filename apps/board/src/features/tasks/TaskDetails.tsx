@@ -106,7 +106,7 @@ export function TaskDetails({
             onVersionChange={setVersionId}
           />
         </fieldset>
-        {session && session.status !== 'none' && (
+        {session && session.state !== 'none' && (
           <p className="field-note">
             The agent got the description when its session first started. Later edits do not reach
             it.

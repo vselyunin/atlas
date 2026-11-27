@@ -95,22 +95,6 @@ describe('SessionTerminal', () => {
     expect(status()).toContain('· atlas/task-one');
   });
 
-  it('offers no start button and says the session is not running', () => {
-    const socket = openSocket();
-    receive(socket, session('none'));
-    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
-    expect(document.querySelector('.session-overlay')?.textContent).toBe(
-      'This session is not running.',
-    );
-
-    receive(socket, session('exited', { exitCode: 0 }));
-    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
-    expect(document.querySelector('.session-overlay')?.textContent).toBe(
-      'This session is not running.',
-    );
-  });
-
   it.each(['starting', 'running'] as const)('offers Stop while %s', async (state) => {
     const user = userEvent.setup();
     const socket = openSocket();

@@ -17,10 +17,14 @@ export function TaskSession({
   /** Reports the live session summary to the parent, so it needs no socket of its own. */
   onInfo?: (info: SessionMessage | null) => void;
 }) {
-  const { connected, info, error, start } = useTaskSession(taskId);
+  const { connected, info, error, errorCount, start } = useTaskSession(taskId);
   const [open, setOpen] = useState(false);
-  // The message that was current when start was sent; the button stays off until a newer one arrives.
-  const [startedAt, setStartedAt] = useState<SessionMessage | null>(null);
+  // What was current when start was sent; the button stays off until a newer session message
+  // or error arrives (a refused start answers with an error and creates no session).
+  const [startedAt, setStartedAt] = useState<{
+    info: SessionMessage | null;
+    errorCount: number;
+  } | null>(null);
 
   useEffect(() => {
     onInfo?.(info);
@@ -32,14 +36,14 @@ export function TaskSession({
   const startLabel =
     !working || !info
       ? null
-      : state === 'none' && info?.reason !== 'no_checkout'
+      : state === 'none' && info.reason !== 'no_checkout'
         ? 'Start session'
         : state === 'exited'
           ? 'Resume session'
           : null;
   const toggleLabel = open ? 'Hide terminal' : live ? 'Connect' : 'Show last output';
   const hasToggle = live || state === 'exited' || open;
-  const waiting = startedAt !== null && startedAt === info;
+  const waiting = startedAt?.info === info && startedAt.errorCount === errorCount;
 
   return (
     <section className="session" aria-label="Agent session">
@@ -52,7 +56,7 @@ export function TaskSession({
               className="button primary"
               disabled={!connected || waiting}
               onClick={() => {
-                setStartedAt(info);
+                setStartedAt({ info, errorCount });
                 start();
                 setOpen(true);
               }}

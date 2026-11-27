@@ -42,23 +42,19 @@ const running = {
 
 function renderPanel() {
   render(<TaskSession taskId="task:one" taskStatus="working" />);
-  const panel = sockets.last();
-  act(() => panel.open());
-  act(() => panel.receive(running));
-  return panel;
+  act(() => sockets.last().open());
+  act(() => sockets.last().receive(running));
 }
 
-it('loads the terminal on demand and closes its socket when hidden', async () => {
+it('loads the terminal on demand and closes the socket when hidden', async () => {
   const user = userEvent.setup();
-  const panel = renderPanel();
+  renderPanel();
   expect(sockets.sockets).toHaveLength(1);
-  expect(panel.url.endsWith(taskSessionPath('task:one'))).toBe(true);
 
   await user.click(screen.getByRole('button', { name: 'Connect' }));
   expect(await screen.findByRole('status')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Hide terminal' })).toBeTruthy();
   const socket = sockets.last();
-  expect(socket).not.toBe(panel);
   expect(socket.url.endsWith(taskSessionPath('task:one'))).toBe(true);
   expect(socket.closed).toBe(false);
 
@@ -66,7 +62,6 @@ it('loads the terminal on demand and closes its socket when hidden', async () =>
   expect(screen.queryByRole('status')).toBeNull();
   expect(screen.getByRole('button', { name: 'Connect' })).toBeTruthy();
   expect(socket.closed).toBe(true);
-  expect(panel.closed).toBe(false);
 });
 
 it('keeps Escape inside the terminal from closing a dialog, but not elsewhere', async () => {

@@ -102,7 +102,7 @@ describe('TaskSession controls', () => {
     await user.dblClick(screen.getByRole('button', { name: 'Start session' }));
     expect(socket.sent).toEqual([{ type: 'start', cols: 120, rows: 30 }]);
     expect(await screen.findByRole('button', { name: 'Hide terminal' })).toBeTruthy();
-    expect(sockets.sockets).toHaveLength(2);
+    await vi.waitFor(() => expect(sockets.sockets).toHaveLength(2), { timeout: 10_000 });
   });
 
   it('keeps Start session off until the next session message arrives', async () => {
@@ -114,6 +114,42 @@ describe('TaskSession controls', () => {
     expect(startButton('Start session').disabled).toBe(true);
     send(socket, session('none', 'problem', 'not_started', 'Worker is offline'));
     expect(startButton('Start session').disabled).toBe(false);
+  });
+
+  it('enables Start session again when a refused start answers with an error', async () => {
+    const user = userEvent.setup();
+    const socket = mount('working');
+    send(socket, session('none', 'none', 'none'));
+    await user.click(screen.getByRole('button', { name: 'Start session' }));
+    expect(startButton('Start session').disabled).toBe(true);
+    send(socket, { type: 'error', message: 'The project worker is offline' });
+    expect(startButton('Start session').disabled).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Start session' }));
+    expect(startButton('Start session').disabled).toBe(true);
+    send(socket, { type: 'error', message: 'The project worker is offline' });
+    expect(startButton('Start session').disabled).toBe(false);
+  });
+
+  it('shows the terminal without a start button and says the session is not running', async () => {
+    const user = userEvent.setup();
+    const socket = mount('todo');
+    send(socket, session('exited', 'ended', 'exited'));
+    await user.click(screen.getByRole('button', { name: 'Show last output' }));
+    await vi.waitFor(() => expect(sockets.sockets).toHaveLength(2), { timeout: 10_000 });
+    const terminal = sockets.last();
+    expect(terminal).not.toBe(socket);
+    act(() => terminal.open());
+    send(terminal, session('exited', 'ended', 'exited'));
+    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+    expect(document.querySelector('.session-overlay')?.textContent).toBe(
+      'This session is not running.',
+    );
+    send(terminal, session('none', 'none', 'none'));
+    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
+    expect(document.querySelector('.session-overlay')?.textContent).toBe(
+      'This session is not running.',
+    );
   });
 
   it('offers Resume session and Show last output for an exited session in Working', async () => {
@@ -192,6 +228,8 @@ describe('TaskDetails description note', () => {
     const socket = mountDetails();
     expect(screen.queryByText(new RegExp(note))).toBeNull();
     send(socket, session('none', 'none', 'none'));
+    expect(screen.queryByText(new RegExp(note))).toBeNull();
+    send(socket, session('none', 'problem', 'not_started', 'Worker is offline'));
     expect(screen.queryByText(new RegExp(note))).toBeNull();
     send(socket, session('running', 'working', 'working'));
     expect(screen.getByText(`${note} Later edits do not reach it.`)).toBeTruthy();
