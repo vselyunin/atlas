@@ -15,6 +15,8 @@ import { request } from './api';
 
 export const taskKey = (projectId: string, versionId: string) =>
   ['tasks', projectId, versionId] as const;
+export const sessionsKey = (projectId: string, versionId: string) =>
+  ['sessions', projectId, versionId] as const;
 export function useProjects() {
   return useQuery({
     queryKey: ['projects'],
@@ -42,7 +44,7 @@ export function useTasks(projectId: string, versionId: string, ready: boolean) {
 }
 export function useSessions(projectId: string, versionId: string, ready: boolean) {
   return useQuery({
-    queryKey: ['sessions', projectId, versionId] as const,
+    queryKey: sessionsKey(projectId, versionId),
     queryFn: ({ signal }) =>
       // `request` adds the API base path itself.
       request(

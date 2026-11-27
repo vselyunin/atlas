@@ -265,43 +265,45 @@ a {
   font-weight: 600;
   margin: 0;
 }
-.status-dot {
+.column-dot {
   height: 7px;
   width: 7px;
   border-radius: 50%;
-  background: var(--status-backlog);
+  background-color: var(--status-backlog);
 }
-.status-dot.todo {
-  background: var(--status-todo);
+.column-dot.todo {
+  background-color: var(--status-todo);
 }
-.status-dot.working {
-  background: var(--status-working);
+.column-dot.working {
+  background-color: var(--status-working);
 }
-.status-dot.done {
-  background: var(--status-done);
+.column-dot.done {
+  background-color: var(--status-done);
 }
-/* Agent session dot on a task card; its colours are separate from the column heading dots. */
-.task-title .status-dot {
+/* Agent session dot on a task card and in the task panel; separate from the column heading dots. */
+.status-dot {
   display: inline-block;
   height: 8px;
   width: 8px;
+  border-radius: 50%;
   margin-right: 6px;
   vertical-align: middle;
+  background-color: var(--status-ended);
 }
-.task-title .status-dot.needs_input {
-  background: var(--status-needs-input);
+.status-dot.needs_input {
+  background-color: var(--status-needs-input);
 }
-.task-title .status-dot.finished {
-  background: var(--status-finished);
+.status-dot.finished {
+  background-color: var(--status-finished);
 }
-.task-title .status-dot.problem {
-  background: var(--status-problem);
+.status-dot.problem {
+  background-color: var(--status-problem);
 }
-.task-title .status-dot.ended {
-  background: var(--status-ended);
+.status-dot.ended {
+  background-color: var(--status-ended);
 }
-.task-title .status-dot.working {
-  background: var(--status-agent-working);
+.status-dot.working {
+  background-color: var(--status-agent-working);
   animation: status-pulse 1.6s ease-in-out infinite;
 }
 @keyframes status-pulse {
@@ -310,7 +312,7 @@ a {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .task-title .status-dot.working {
+  .status-dot.working {
     animation: none;
   }
 }
@@ -573,6 +575,10 @@ a {
   margin: 10px 0 0;
   font-size: 12px;
   color: var(--muted);
+}
+.session-summary .status-dot {
+  flex: none;
+  margin-right: 0;
 }
 .session-heading h3 {
   margin: 0;

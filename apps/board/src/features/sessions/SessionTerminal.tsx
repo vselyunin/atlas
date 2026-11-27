@@ -7,14 +7,20 @@ import {
   MAX_SESSION_INPUT_CHARS,
   taskSessionPath,
 } from '@atlas/contracts';
-import type { BoardToApiSessionMessage, SessionState } from '@atlas/contracts';
+import type { BoardToApiSessionMessage, SessionState, SessionSummary } from '@atlas/contracts';
+import { statusSentence } from './status';
 
-interface SessionInfo {
+interface SessionInfo extends SessionSummary {
   state: SessionState;
   branch: string | null;
   worktreePath: string | null;
-  exitCode: number | null;
-  message: string | null;
+}
+
+// The session's message in words: an API error kind or a refusal reads as its status sentence.
+function sessionNote(info: SessionInfo | null): string | null {
+  if (!info?.message?.trim()) return null;
+  if (info.reason === 'api_error' || info.reason === 'not_started') return statusSentence(info);
+  return info.message;
 }
 
 const STATE_LABELS: Readonly<Record<SessionState, string>> = {
@@ -142,9 +148,9 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
         )}
       </div>
       {info?.worktreePath && <p className="field-note">Worktree: {info.worktreePath}</p>}
-      {(error ?? info?.message) && (
+      {(error ?? sessionNote(info)) && (
         <p role="alert" className="error">
-          {error ?? info?.message}
+          {error ?? sessionNote(info)}
         </p>
       )}
       <div className="session-frame">

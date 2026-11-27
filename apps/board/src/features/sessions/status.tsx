@@ -20,7 +20,7 @@ function clock(since: string | null) {
 
 export function statusSentence(summary: StatusFields): string {
   const time = clock(summary.since);
-  const message = summary.message ?? '';
+  const message = summary.message?.trim() ?? '';
   switch (summary.reason) {
     case 'starting':
       return 'Starting…';
@@ -37,14 +37,15 @@ export function statusSentence(summary: StatusFields): string {
     case 'resumed':
       return 'Resumed, waiting for your message';
     case 'not_started':
-      return `Session not started: ${message}`;
+      return message ? `Session not started: ${message}` : 'Session not started';
     case 'start_failed':
+      return message || 'The session could not start';
     case 'worker_lost':
-      return message;
+      return message || 'The Worker restarted and the session was lost';
     case 'exit_error':
       return `Agent exited with code ${summary.exitCode ?? 'unknown'}`;
     case 'api_error':
-      return `Model API error: ${message.replaceAll('_', ' ')}`;
+      return message ? `Model API error: ${message.replaceAll('_', ' ')}` : 'Model API error';
     case 'worker_offline':
       return 'Worker offline';
     case 'exited': {

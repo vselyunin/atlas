@@ -171,7 +171,7 @@ function TaskColumn({
       className={`column ${isOver || destination ? 'drop-over' : ''}`}
     >
       <div className="column-heading">
-        <span className={`status-dot ${status}`} />
+        <span className={`column-dot ${status}`} />
         <h2>{TASK_STATUS_LABELS[status]}</h2>
         <span className="count">{tasks.length}</span>
         {(status === 'backlog' || status === 'todo') && (
