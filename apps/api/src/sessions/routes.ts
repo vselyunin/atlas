@@ -1,19 +1,37 @@
-import { API_BASE_PATH, BoardToApiSessionMessageSchema } from '@atlas/contracts';
+import {
+  API_BASE_PATH,
+  BoardToApiSessionMessageSchema,
+  IdSchema,
+  SessionListResponseSchema,
+} from '@atlas/contracts';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import { SESSION_COOKIE } from '../auth/sessions.js';
 import type { SessionStore } from '../auth/sessions.js';
-import { ApiError } from '../http/errors.js';
+import type { ApiContext } from '../db/client.js';
+import { ApiError, parseInput } from '../http/errors.js';
+import { listTasks } from '../tasks/service.js';
 import type { SessionHub } from './hub.js';
 
+const VersionParams = z.strictObject({ projectId: IdSchema, versionId: IdSchema });
+
 // Spike: the Board attaches to a task's agent terminal over this socket.
-// The route has no `access` value, so with sign-in on the upgrade requires a session.
+// Neither route has an `access` value, so with sign-in on both require a session.
 // `authSessions` is given only while sign-in is on.
 export function registerSessionRoutes(
   app: FastifyInstance,
+  context: ApiContext,
   hub: SessionHub,
   allowedOrigin: string,
   authSessions?: SessionStore,
 ) {
+  // The Board polls this for the status dots of a version's cards.
+  app.get(`${API_BASE_PATH}/projects/:projectId/versions/:versionId/sessions`, (request) => {
+    const { projectId, versionId } = parseInput(VersionParams, request.params);
+    const taskIds = listTasks(context, projectId, versionId).map((task) => task.id);
+    return SessionListResponseSchema.parse({ items: hub.summaries(taskIds) });
+  });
+
   app.route<{ Params: { taskId: string } }>({
     method: 'GET',
     url: `${API_BASE_PATH}/tasks/:taskId/session`,

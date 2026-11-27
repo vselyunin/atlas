@@ -126,6 +126,7 @@ export function registerGateway(
         } catch {
           request.log.error({ requestId: request.id }, 'Failed to persist Worker disconnection');
         }
+        sessions.onWorkerDisconnected(workerId);
       });
       socket.on('message', (data, binary) => {
         if (socket.readyState !== WebSocket.OPEN) return;
@@ -137,6 +138,7 @@ export function registerGateway(
               throw new ApiError(400, 'registration_required', 'Register the Worker first');
             registry.register(socket, message.payload);
             workerId = message.payload.workerId;
+            sessions.onWorkerRegistered(workerId);
             clearTimeout(registrationDeadline);
             send({
               protocolVersion: PROTOCOL_VERSION,
@@ -206,6 +208,9 @@ export function registerGateway(
               break;
             case 'session.activity':
               sessions.onActivity(workerId, message.payload);
+              break;
+            case 'session.sync':
+              sessions.onSync(workerId, message.payload);
               break;
             case 'protocol.error':
               request.log.info({ requestId: request.id }, 'Worker reported a protocol error');
