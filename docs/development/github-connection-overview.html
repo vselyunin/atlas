@@ -1,0 +1,925 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body style="margin: 0">
+    <title>Atlas GitHub Connection</title>
+    <meta name="claude:viewport-fit-sides" content="cover" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      /* Layout: one reading column of short sections; each mechanism gets a full-width figure, with
+   amber reserved for anything that carries a secret. */
+      :root {
+        --bg: #f5f6f8;
+        --surface: #ffffff;
+        --fg: #18202c;
+        --muted: #5a6577;
+        --line: #dde1e8;
+        --line-strong: #aab3c2;
+        --accent: #2452c4;
+        --secret: #b0500a;
+        --note: #eef1f6;
+        --font-display: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
+        --font-body: Inter, 'Segoe UI', system-ui, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #11151b;
+          --surface: #19202a;
+          --fg: #e5e9f0;
+          --muted: #98a3b4;
+          --line: #29323f;
+          --line-strong: #4c5869;
+          --accent: #86a9ff;
+          --secret: #f0a64b;
+          --note: #212a36;
+          color-scheme: dark;
+        }
+      }
+      :root[data-theme='dark'] {
+        --bg: #11151b;
+        --surface: #19202a;
+        --fg: #e5e9f0;
+        --muted: #98a3b4;
+        --line: #29323f;
+        --line-strong: #4c5869;
+        --accent: #86a9ff;
+        --secret: #f0a64b;
+        --note: #212a36;
+        color-scheme: dark;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: var(--font-body);
+        font-size: 16px;
+        line-height: 1.6;
+      }
+      .page {
+        max-width: 1040px;
+        margin: 0 auto;
+        padding-block: 48px 72px;
+        padding-left: max(16px, env(safe-area-inset-left, 0px));
+        padding-right: max(16px, env(safe-area-inset-right, 0px));
+        display: flex;
+        flex-direction: column;
+        gap: 56px;
+      }
+      header,
+      section {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        min-width: 0;
+      }
+      h1,
+      h2 {
+        font-family: var(--font-display);
+        font-weight: 600;
+        text-wrap: balance;
+        margin: 0;
+        line-height: 1.15;
+      }
+      h1 {
+        font-size: clamp(2rem, 5vw, 2.75rem);
+        letter-spacing: -0.02em;
+      }
+      h2 {
+        font-size: 1.5rem;
+        letter-spacing: -0.01em;
+      }
+      p,
+      ul {
+        margin: 0;
+        max-width: 68ch;
+      }
+      ul {
+        padding-left: 1.2em;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .eyebrow {
+        font-size: 0.78rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      .lede {
+        font-size: 1.15rem;
+        color: var(--fg);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      code {
+        font-family: var(--font-mono);
+        font-size: 0.86em;
+        background: var(--note);
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        overflow-wrap: anywhere;
+      }
+      .key {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px 24px;
+        font-size: 0.9rem;
+        color: var(--muted);
+      }
+      .key span {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .key i {
+        display: inline-block;
+        width: 28px;
+        height: 0;
+        border-top: 2px solid var(--fg);
+      }
+      .key i.sec {
+        border-top: 3px solid var(--secret);
+      }
+      .key i.back {
+        border-top: 2px dashed var(--fg);
+      }
+      figure {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .scroll {
+        overflow-x: auto;
+        background: var(--surface);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 12px;
+      }
+      figcaption {
+        font-size: 0.9rem;
+        color: var(--muted);
+        max-width: 75ch;
+      }
+      svg.dia {
+        display: block;
+        width: 100%;
+        height: auto;
+        color: var(--fg);
+        font-family: var(--font-body);
+      }
+      .dia .box {
+        fill: var(--bg);
+        stroke: var(--line-strong);
+        stroke-width: 1.5;
+      }
+      .dia .life {
+        stroke: var(--line-strong);
+        stroke-width: 1;
+        stroke-dasharray: 2 5;
+      }
+      .dia .arr {
+        stroke: var(--fg);
+        stroke-width: 1.5;
+        fill: none;
+      }
+      .dia .arr.sec {
+        stroke: var(--secret);
+        stroke-width: 2.25;
+      }
+      .dia .arr.dash {
+        stroke-dasharray: 6 4;
+      }
+      .dia .mk {
+        fill: var(--fg);
+      }
+      .dia .mk-sec {
+        fill: var(--secret);
+      }
+      .dia .head {
+        fill: var(--fg);
+        font-family: var(--font-display);
+        font-weight: 600;
+        font-size: 14px;
+      }
+      .dia .sub {
+        fill: var(--muted);
+        font-size: 11.5px;
+      }
+      .dia .lbl {
+        fill: var(--fg);
+        font-size: 12.5px;
+      }
+      .dia .lbl.sec {
+        fill: var(--secret);
+        font-weight: 600;
+      }
+      .dia .num {
+        fill: var(--muted);
+        font-size: 10.5px;
+        font-variant-numeric: tabular-nums;
+      }
+      .dia .note {
+        fill: var(--note);
+        stroke: var(--line-strong);
+        stroke-width: 1;
+      }
+      .tablewrap {
+        overflow-x: auto;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 0.93rem;
+      }
+      th,
+      td {
+        text-align: left;
+        vertical-align: top;
+        padding: 10px 14px 10px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      th {
+        font-size: 0.78rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 600;
+      }
+      td:first-child {
+        font-weight: 500;
+        white-space: nowrap;
+      }
+      .secret {
+        color: var(--secret);
+        font-weight: 600;
+      }
+      .files {
+        list-style: none;
+        padding: 0;
+        max-width: none;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 12px 32px;
+      }
+      .files li {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        min-width: 0;
+      }
+      .files code {
+        align-self: flex-start;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+
+    <div class="page">
+      <header>
+        <span class="eyebrow">Pull request 3 · vselyunin/atlas</span>
+        <h1>How Atlas connects to GitHub</h1>
+        <p class="lede">
+          Atlas creates its own GitHub App and keeps every credential with the one part of the
+          system that needs it. Three pictures show how: who holds what, how you sign in, and how a
+          repository is cloned.
+        </p>
+        <div class="key" aria-label="How to read the diagrams">
+          <span><i></i> a request or message</span>
+          <span><i class="back"></i> a reply or redirect</span>
+          <span><i class="sec"></i> <span class="secret">carries a secret</span></span>
+        </div>
+      </header>
+
+      <section>
+        <span class="eyebrow">The parts</span>
+        <h2>Only the API holds the App's key</h2>
+        <figure>
+          <div class="scroll">
+            <svg
+              class="dia"
+              role="img"
+              aria-label="The Board talks to the API with a session cookie. Only the API holds the GitHub App key. The Worker gets a read-only token for one clone, and task agents get nothing."
+              viewBox="0 0 990 400"
+              style="min-width: 720px"
+            >
+              <defs>
+                <marker
+                  id="arch-a"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk" d="M0 0 10 5 0 10z" />
+                </marker>
+                <marker
+                  id="arch-s"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk-sec" d="M0 0 10 5 0 10z" />
+                </marker>
+              </defs>
+              <rect class="box" x="20" y="40" width="230" height="76" rx="8" />
+              <text class="head" x="36" y="66">Board (your browser)</text>
+              <text class="sub" x="36" y="88">holds a session cookie</text>
+              <text class="sub" x="36" y="106">no GitHub secret</text>
+              <rect class="box" x="380" y="40" width="230" height="76" rx="8" />
+              <text class="head" x="396" y="66">API</text>
+              <text class="lbl sec" x="396" y="88">holds the App key and secret</text>
+              <text class="sub" x="396" y="106">sessions as hashes in SQLite</text>
+              <rect class="box" x="740" y="40" width="230" height="76" rx="8" />
+              <text class="head" x="756" y="66">github.com</text>
+              <text class="sub" x="756" y="88">the App: 3 permissions,</text>
+              <text class="sub" x="756" y="106">chosen repositories only</text>
+              <rect class="box" x="380" y="270" width="230" height="76" rx="8" />
+              <text class="head" x="396" y="296">Worker (container)</text>
+              <text class="lbl sec" x="396" y="318">clone token, in memory,</text>
+              <text class="lbl sec" x="396" y="336">for one clone only</text>
+              <rect class="box" x="20" y="270" width="230" height="76" rx="8" />
+              <text class="head" x="36" y="296">Task agent (sandbox)</text>
+              <text class="sub" x="36" y="318">holds no credential</text>
+              <text class="sub" x="36" y="336">works in a worktree</text>
+              <line class="arr" x1="250" y1="78" x2="378" y2="78" marker-end="url(#arch-a)" />
+              <text class="lbl" x="315" y="68" text-anchor="middle">HTTP requests</text>
+              <text class="sub" x="315" y="96" text-anchor="middle">session cookie</text>
+              <line class="arr sec" x1="610" y1="78" x2="738" y2="78" marker-end="url(#arch-s)" />
+              <text class="lbl sec" x="675" y="68" text-anchor="middle">signed as the App</text>
+              <text class="sub" x="675" y="96" text-anchor="middle">mints, revokes</text>
+              <line class="arr" x1="450" y1="118" x2="450" y2="268" marker-end="url(#arch-a)" />
+              <text class="lbl" x="440" y="190" text-anchor="end">commands,</text>
+              <text class="lbl" x="440" y="207" text-anchor="end">never a token</text>
+              <line class="arr sec" x1="540" y1="118" x2="540" y2="268" marker-end="url(#arch-s)" />
+              <text class="lbl sec" x="550" y="190">token, only when</text>
+              <text class="lbl sec" x="550" y="207">the Worker asks</text>
+              <text class="sub" x="495" y="140" text-anchor="middle">one WebSocket</text>
+              <path class="arr sec" d="M610 310 H855 V120" marker-end="url(#arch-s)" />
+              <text class="lbl sec" x="732" y="300" text-anchor="middle">git fetch over HTTPS</text>
+              <text class="sub" x="732" y="328" text-anchor="middle">
+                one repository, read-only
+              </text>
+              <line class="arr" x1="378" y1="310" x2="252" y2="310" marker-end="url(#arch-a)" />
+              <text class="lbl" x="315" y="300" text-anchor="middle">starts sessions</text>
+              <text class="sub" x="315" y="328" text-anchor="middle">no credentials passed</text>
+            </svg>
+          </div>
+          <figcaption>
+            The Worker and the task agents run code from repositories, so neither ever sees the
+            App's key. The Worker gets one narrow token per clone; an agent gets nothing.
+          </figcaption>
+        </figure>
+        <ul>
+          <li>
+            The App's key and secret live in <code>.atlas/github-app.json</code>, readable only by
+            you (mode <code>0600</code>).
+          </li>
+          <li>
+            The App has three permissions (Contents, Pull requests, Metadata), no webhook, and
+            reaches only the repositories you choose.
+          </li>
+          <li>
+            The Board creates the App through GitHub's manifest flow, so no secret is copied by
+            hand.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <span class="eyebrow">Sign-in</span>
+        <h2>GitHub says who you are; Atlas decides if you get in</h2>
+        <figure>
+          <div class="scroll">
+            <svg
+              class="dia"
+              role="img"
+              aria-label="Sign-in: the API sends the browser to GitHub with a single-use state and a PKCE challenge, exchanges the returned code, reads who signed in, revokes the user token and sets a session cookie."
+              viewBox="0 0 900 596"
+              style="min-width: 648px"
+            >
+              <defs>
+                <marker
+                  id="signin-a"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk" d="M0 0 10 5 0 10z" />
+                </marker>
+                <marker
+                  id="signin-s"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk-sec" d="M0 0 10 5 0 10z" />
+                </marker>
+              </defs>
+              <line class="life" x1="150" y1="74" x2="150" y2="582" />
+              <rect class="box" x="70" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="150" y="49" text-anchor="middle">Browser</text>
+              <text class="sub" x="150" y="65" text-anchor="middle">the Board</text>
+              <line class="life" x1="470" y1="74" x2="470" y2="582" />
+              <rect class="box" x="390" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="470" y="49" text-anchor="middle">API</text>
+              <text class="sub" x="470" y="65" text-anchor="middle">Fastify + SQLite</text>
+              <line class="life" x1="790" y1="74" x2="790" y2="582" />
+              <rect class="box" x="710" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="790" y="49" text-anchor="middle">github.com</text>
+              <text class="sub" x="790" y="65" text-anchor="middle">the Atlas App</text>
+              <text class="num" x="14" y="116" text-anchor="middle">1</text>
+              <line class="arr" x1="150" y1="112" x2="468" y2="112" marker-end="url(#signin-a)" />
+              <text class="lbl" x="310" y="104" text-anchor="middle">Sign in with GitHub</text>
+              <text class="num" x="14" y="160" text-anchor="middle">2</text>
+              <line
+                class="arr dash"
+                x1="470"
+                y1="156"
+                x2="152"
+                y2="156"
+                marker-end="url(#signin-a)"
+              />
+              <text class="lbl" x="310" y="148" text-anchor="middle">
+                redirect: state + PKCE challenge
+              </text>
+              <text class="num" x="14" y="204" text-anchor="middle">3</text>
+              <line class="arr" x1="150" y1="200" x2="788" y2="200" marker-end="url(#signin-a)" />
+              <text class="lbl" x="630" y="192" text-anchor="middle">
+                you approve Atlas on GitHub
+              </text>
+              <text class="num" x="14" y="248" text-anchor="middle">4</text>
+              <line
+                class="arr dash"
+                x1="790"
+                y1="244"
+                x2="152"
+                y2="244"
+                marker-end="url(#signin-a)"
+              />
+              <text class="lbl" x="630" y="236" text-anchor="middle">
+                redirect back with a code
+              </text>
+              <text class="num" x="14" y="292" text-anchor="middle">5</text>
+              <line class="arr" x1="150" y1="288" x2="468" y2="288" marker-end="url(#signin-a)" />
+              <text class="lbl" x="310" y="280" text-anchor="middle">callback: code + state</text>
+              <text class="num" x="14" y="336" text-anchor="middle">6</text>
+              <rect class="note" x="326.9" y="318" width="286.2" height="28" rx="14" />
+              <text class="lbl" x="470" y="336" text-anchor="middle">
+                state matches this browser? used once?
+              </text>
+              <text class="num" x="14" y="380" text-anchor="middle">7</text>
+              <line class="arr" x1="470" y1="376" x2="788" y2="376" marker-end="url(#signin-a)" />
+              <text class="lbl" x="630" y="368" text-anchor="middle">
+                exchange code + PKCE verifier
+              </text>
+              <text class="num" x="14" y="424" text-anchor="middle">8</text>
+              <line
+                class="arr sec dash"
+                x1="790"
+                y1="420"
+                x2="472"
+                y2="420"
+                marker-end="url(#signin-s)"
+              />
+              <text class="lbl sec" x="630" y="412" text-anchor="middle">user token</text>
+              <text class="num" x="14" y="468" text-anchor="middle">9</text>
+              <line
+                class="arr sec"
+                x1="470"
+                y1="464"
+                x2="788"
+                y2="464"
+                marker-end="url(#signin-s)"
+              />
+              <text class="lbl sec" x="630" y="456" text-anchor="middle">
+                who is this? then revoke the token
+              </text>
+              <text class="num" x="14" y="512" text-anchor="middle">10</text>
+              <rect class="note" x="371.75" y="494" width="196.5" height="28" rx="14" />
+              <text class="lbl" x="470" y="512" text-anchor="middle">
+                owner, member, or refused
+              </text>
+              <text class="num" x="14" y="556" text-anchor="middle">11</text>
+              <line
+                class="arr dash"
+                x1="470"
+                y1="552"
+                x2="152"
+                y2="552"
+                marker-end="url(#signin-a)"
+              />
+              <text class="lbl" x="310" y="544" text-anchor="middle">
+                new session cookie (30 days)
+              </text>
+            </svg>
+          </div>
+          <figcaption>
+            The user token exists for two requests and is then revoked. Atlas stores no GitHub token
+            for any user.
+          </figcaption>
+        </figure>
+        <ul>
+          <li>
+            <strong>First owner.</strong> The first sign-in becomes the owner only from the browser
+            that created the App, or after entering the one-time owner code the API prints in its
+            terminal.
+          </li>
+          <li>
+            <strong>Members.</strong> The owner adds people by GitHub login. They are stored by
+            GitHub ID, so a renamed account keeps its access.
+          </li>
+          <li>
+            <strong>Pending sign-ins live in memory.</strong> The state in steps 2 and 5 is
+            single-use and tied to a browser cookie. Restarting the API during a sign-in makes it
+            fail with <code>state_invalid</code>; signing in again works.
+          </li>
+          <li>
+            <strong>Off switch.</strong> <code>ATLAS_AUTH=off</code> disables sign-in and everything
+            that needs GitHub.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <span class="eyebrow">Clone from GitHub</span>
+        <h2>The token is made late, used twice and revoked</h2>
+        <figure>
+          <div class="scroll">
+            <svg
+              class="dia"
+              role="img"
+              aria-label="Clone: the API sends the Worker a clone command without a token. The Worker asks for a credential, the API mints a token for one repository with read access, the Worker passes it to two Git processes through an environment variable, and the API revokes it when the result arrives."
+              viewBox="0 0 1030 728"
+              style="min-width: 742px"
+            >
+              <defs>
+                <marker
+                  id="clone-a"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="8"
+                  markerHeight="8"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk" d="M0 0 10 5 0 10z" />
+                </marker>
+                <marker
+                  id="clone-s"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path class="mk-sec" d="M0 0 10 5 0 10z" />
+                </marker>
+              </defs>
+              <line class="life" x1="110" y1="74" x2="110" y2="714" />
+              <rect class="box" x="30" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="110" y="49" text-anchor="middle">Board</text>
+              <text class="sub" x="110" y="65" text-anchor="middle">your browser</text>
+              <line class="life" x1="310" y1="74" x2="310" y2="714" />
+              <rect class="box" x="230" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="310" y="49" text-anchor="middle">API</text>
+              <text class="sub" x="310" y="65" text-anchor="middle">holds the App key</text>
+              <line class="life" x1="520" y1="74" x2="520" y2="714" />
+              <rect class="box" x="440" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="520" y="49" text-anchor="middle">github.com</text>
+              <text class="sub" x="520" y="65" text-anchor="middle">the Atlas App</text>
+              <line class="life" x1="740" y1="74" x2="740" y2="714" />
+              <rect class="box" x="660" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="740" y="49" text-anchor="middle">Worker</text>
+              <text class="sub" x="740" y="65" text-anchor="middle">container</text>
+              <line class="life" x1="940" y1="74" x2="940" y2="714" />
+              <rect class="box" x="860" y="30" width="160" height="44" rx="6" />
+              <text class="head" x="940" y="49" text-anchor="middle">Git</text>
+              <text class="sub" x="940" y="65" text-anchor="middle">child processes</text>
+              <text class="num" x="14" y="116" text-anchor="middle">1</text>
+              <line class="arr" x1="110" y1="112" x2="308" y2="112" marker-end="url(#clone-a)" />
+              <text class="lbl" x="210" y="104" text-anchor="middle">create project: clone X</text>
+              <text class="num" x="14" y="160" text-anchor="middle">2</text>
+              <line class="arr" x1="310" y1="156" x2="518" y2="156" marker-end="url(#clone-a)" />
+              <text class="lbl" x="415" y="148" text-anchor="middle">can the App reach X?</text>
+              <text class="num" x="14" y="204" text-anchor="middle">3</text>
+              <line class="arr" x1="310" y1="200" x2="738" y2="200" marker-end="url(#clone-a)" />
+              <text class="lbl" x="630" y="192" text-anchor="middle">clone command, no token</text>
+              <text class="num" x="14" y="248" text-anchor="middle">4</text>
+              <rect
+                class="note"
+                x="648.65"
+                y="230"
+                width="182.70000000000002"
+                height="28"
+                rx="14"
+              />
+              <text class="lbl" x="740" y="248" text-anchor="middle">make folder, journal it</text>
+              <text class="num" x="14" y="292" text-anchor="middle">5</text>
+              <line class="arr" x1="740" y1="288" x2="312" y2="288" marker-end="url(#clone-a)" />
+              <text class="lbl" x="630" y="280" text-anchor="middle">asks for a credential</text>
+              <text class="num" x="14" y="336" text-anchor="middle">6</text>
+              <line
+                class="arr sec"
+                x1="310"
+                y1="332"
+                x2="518"
+                y2="332"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="415" y="324" text-anchor="middle">
+                mint: 1 repo, read-only
+              </text>
+              <text class="num" x="14" y="380" text-anchor="middle">7</text>
+              <line
+                class="arr sec dash"
+                x1="520"
+                y1="376"
+                x2="312"
+                y2="376"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="415" y="368" text-anchor="middle">short-lived token</text>
+              <text class="num" x="14" y="424" text-anchor="middle">8</text>
+              <line
+                class="arr sec"
+                x1="310"
+                y1="420"
+                x2="738"
+                y2="420"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="630" y="412" text-anchor="middle">
+                token, on that socket only
+              </text>
+              <text class="num" x="14" y="468" text-anchor="middle">9</text>
+              <line
+                class="arr sec"
+                x1="740"
+                y1="464"
+                x2="938"
+                y2="464"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="840" y="456" text-anchor="middle">
+                token in an env variable
+              </text>
+              <text class="num" x="14" y="512" text-anchor="middle">10</text>
+              <line
+                class="arr sec"
+                x1="940"
+                y1="508"
+                x2="522"
+                y2="508"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="630" y="500" text-anchor="middle">
+                ls-remote + fetch, HTTPS
+              </text>
+              <text class="num" x="14" y="556" text-anchor="middle">11</text>
+              <line class="arr" x1="740" y1="552" x2="938" y2="552" marker-end="url(#clone-a)" />
+              <text class="lbl" x="840" y="544" text-anchor="middle">checkout, without token</text>
+              <text class="num" x="14" y="600" text-anchor="middle">12</text>
+              <line class="arr" x1="740" y1="596" x2="312" y2="596" marker-end="url(#clone-a)" />
+              <text class="lbl" x="630" y="588" text-anchor="middle">result: cloned or failed</text>
+              <text class="num" x="14" y="644" text-anchor="middle">13</text>
+              <line
+                class="arr sec"
+                x1="310"
+                y1="640"
+                x2="518"
+                y2="640"
+                marker-end="url(#clone-s)"
+              />
+              <text class="lbl sec" x="415" y="632" text-anchor="middle">revoke the token</text>
+              <text class="num" x="14" y="688" text-anchor="middle">14</text>
+              <line
+                class="arr dash"
+                x1="310"
+                y1="684"
+                x2="112"
+                y2="684"
+                marker-end="url(#clone-a)"
+              />
+              <text class="lbl" x="210" y="676" text-anchor="middle">project ready</text>
+            </svg>
+          </div>
+          <figcaption>
+            The clone command in step 3 carries no token. The Worker asks for one only after the
+            folder exists and is journaled, and the API answers only on the socket that received the
+            command.
+          </figcaption>
+        </figure>
+        <ul>
+          <li>
+            <strong>Narrow token.</strong> It works for one repository, only for reading contents,
+            and for a short time.
+          </li>
+          <li>
+            <strong>Never written down.</strong> A 26-line helper script hands the token to Git from
+            an environment variable, so it never appears in a command line, the remote address or
+            <code>.git/config</code>.
+          </li>
+          <li>
+            <strong>Git is locked down.</strong> User and system configuration are off, hooks are
+            off, redirects are not followed, and only HTTPS is allowed.
+          </li>
+          <li>
+            <strong>Recovery.</strong> The Worker journals each stage. A clone that never reached
+            <code>cloned</code> shows as "Repository needs attention" and its folder is kept.
+          </li>
+        </ul>
+      </section>
+
+      <section>
+        <span class="eyebrow">Access</span>
+        <h2>Every route says who may call it</h2>
+        <p>
+          One hook in the API enforces the rule each route declares. A route that declares nothing
+          requires a session, so a forgotten declaration fails closed. A test reads the live route
+          list to check them all.
+        </p>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Level</th>
+                <th>Who</th>
+                <th>Examples</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>public</td>
+                <td>Anyone on this machine</td>
+                <td>Sign-in start and callback, the sign-in state the Board reads on load</td>
+              </tr>
+              <tr>
+                <td>session</td>
+                <td>The owner and members</td>
+                <td>Projects, tasks, repository list, links, clones</td>
+              </tr>
+              <tr>
+                <td>owner</td>
+                <td>The owner only</td>
+                <td>Adding and removing members</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <span class="eyebrow">Storage</span>
+        <h2>What is kept where</h2>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Place</th>
+                <th>Holds</th>
+                <th>Secret?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>App file</td>
+                <td>The App's ID, private key and client secret</td>
+                <td class="secret">Yes, mode 0600</td>
+              </tr>
+              <tr>
+                <td>SQLite</td>
+                <td>
+                  <code>users</code>, <code>auth_sessions</code>, <code>installation</code>,
+                  <code>github_links</code>
+                </td>
+                <td>Session IDs and the owner code only as hashes</td>
+              </tr>
+              <tr>
+                <td>API memory</td>
+                <td>Pending sign-ins, the clone token while a clone runs</td>
+                <td class="secret">Yes, gone on restart</td>
+              </tr>
+              <tr>
+                <td>Worker journal</td>
+                <td>Commands and their stages</td>
+                <td>No token, ever</td>
+              </tr>
+              <tr>
+                <td>Your browser</td>
+                <td>A session cookie, valid 30 days</td>
+                <td class="secret">Yes</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <span class="eyebrow">Libraries</span>
+        <h2>One new dependency</h2>
+        <p>
+          The pull request adds only <code>@fastify/cookie</code>, the official Fastify plugin for
+          cookies. Everything else uses what the project already had, or Node itself, to keep
+          third-party code away from the credentials.
+        </p>
+        <div class="tablewrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Need</th>
+                <th>Used</th>
+                <th>Why</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Cookies</td>
+                <td><code>@fastify/cookie</code> (new)</td>
+                <td>Sessions, sign-in state and the setup mark all need cookies</td>
+              </tr>
+              <tr>
+                <td>Calling GitHub</td>
+                <td>Node's <code>fetch</code>, checked with <code>zod</code></td>
+                <td>About a dozen endpoints; tests can point it at a local stand-in</td>
+              </tr>
+              <tr>
+                <td>App token (JWT)</td>
+                <td><code>node:crypto</code>, 16 lines</td>
+                <td>One fixed token shape; no library needed on a security path</td>
+              </tr>
+              <tr>
+                <td>IDs, hashes, PKCE</td>
+                <td><code>node:crypto</code></td>
+                <td>Built in</td>
+              </tr>
+              <tr>
+                <td>Database</td>
+                <td><code>drizzle-orm</code> on SQLite</td>
+                <td>Already used by the API</td>
+              </tr>
+              <tr>
+                <td>Cloning</td>
+                <td>The <code>git</code> program</td>
+                <td>The Worker already runs Git this way, with its own hardening</td>
+              </tr>
+              <tr>
+                <td>Board</td>
+                <td>React, TanStack Query</td>
+                <td>Already used by the Board</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <span class="eyebrow">Reading the code</span>
+        <h2>Four files carry most of the design</h2>
+        <ul class="files">
+          <li>
+            <code>apps/api/src/auth/access.ts</code><span class="muted">Who may call what</span>
+          </li>
+          <li>
+            <code>apps/api/src/auth/signin.ts</code
+            ><span class="muted">The sign-in flow and the first-owner rule</span>
+          </li>
+          <li>
+            <code>apps/api/src/github/credentials.ts</code
+            ><span class="muted">Minting and revoking clone tokens</span>
+          </li>
+          <li>
+            <code>apps/worker/src/repositories/clone.ts</code
+            ><span class="muted">The clone, step by step</span>
+          </li>
+        </ul>
+        <p class="muted">
+          The full reasoning and the rejected alternatives are in
+          <code>docs/superpowers/specs/2026-11-25-github-connection-design.md</code>.
+        </p>
+      </section>
+    </div>
+  </body>
+</html>
