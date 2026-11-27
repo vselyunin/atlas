@@ -17,6 +17,10 @@
   --status-todo: #7963a4;
   --status-working: #98701c;
   --status-done: #4f7957;
+  --status-needs-input: #356bc4;
+  --status-finished: #2a7f86;
+  --status-problem: #b3382c;
+  --status-ended: #6b6b6b;
   --chip-bg: #e8eaed;
   --chip-text: #4c5969;
   --epic-bg: #eee8f6;
@@ -51,6 +55,10 @@
   --status-todo: #b1a2d6;
   --status-working: #d2b376;
   --status-done: #89b893;
+  --status-needs-input: #8bb3ec;
+  --status-finished: #6fc7cd;
+  --status-problem: #f0877b;
+  --status-ended: #9a9a9a;
   --chip-bg: #30343b;
   --chip-text: #c5cedc;
   --epic-bg: #382d46;
@@ -269,6 +277,39 @@ a {
 }
 .status-dot.done {
   background: var(--status-done);
+}
+/* Agent session dot on a task card; --status-working is shared with the Working column. */
+.task-title .status-dot {
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.task-title .status-dot.needs_input {
+  background: var(--status-needs-input);
+}
+.task-title .status-dot.finished {
+  background: var(--status-finished);
+}
+.task-title .status-dot.problem {
+  background: var(--status-problem);
+}
+.task-title .status-dot.ended {
+  background: var(--status-ended);
+}
+.task-title .status-dot.working {
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+@keyframes status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-title .status-dot.working {
+    animation: none;
+  }
 }
 .count {
   font-size: 10px;

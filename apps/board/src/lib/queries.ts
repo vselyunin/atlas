@@ -1,5 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import {
+  API_BASE_PATH,
+  versionSessionsPath,
+  SessionListResponseSchema,
   GithubConnectionResponseSchema,
   GithubLinkResponseSchema,
   GithubRepositoryListResponseSchema,
@@ -35,6 +38,20 @@ export function useTasks(projectId: string, versionId: string, ready: boolean) {
         signal,
       }),
     enabled: !!projectId && !!versionId && ready,
+  });
+}
+export function useSessions(projectId: string, versionId: string, ready: boolean) {
+  return useQuery({
+    queryKey: ['sessions', projectId, versionId] as const,
+    queryFn: ({ signal }) =>
+      // `request` adds the API base path itself.
+      request(
+        versionSessionsPath(projectId, versionId).slice(API_BASE_PATH.length),
+        SessionListResponseSchema,
+        { signal },
+      ),
+    enabled: !!projectId && !!versionId && ready,
+    refetchInterval: 3_000,
   });
 }
 export function useGithubConnection() {
