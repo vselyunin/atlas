@@ -43,6 +43,14 @@ Asked of the user before execution; do not touch these files until the answer is
 | `apps/api/tests/route-protection.test.ts`                                  | Add the new sessions route to its route list, if the test keeps one                                      | New route                                                |
 | `apps/worker/tests/clone-connection.test.ts`                               | Expect the fourth capability in the register message, if it asserts the exact list                       | New capability                                           |
 
+Found after a closer read of the tests (also asked):
+
+- `apps/api/tests/sessions.test.ts` lines 54-64, 148-155 and 217-225 compare the whole `session` message; each expected object gains `status`, `reason` and `since`.
+- `packages/contracts/tests/sessions.test.ts` lines 154-161 and `apps/board/tests/session-terminal.test.tsx` lines 38-48 build a `session` message; each builder gains the three fields.
+- `apps/worker/tests/clone-connection.test.ts` line 98: the expected capability list gains `agent.session.status`.
+- `apps/worker/tests/sessions.test.ts` lines 144, 197, 311, 328 and 371 compare the whole event list; they gain the run notice output and, where a run has no prompt, the activity event. The exact lines are settled in Task 4 and shown to the user before the edit.
+- `apps/api/tests/route-protection.test.ts` reads the route list from the app and needs no change.
+
 Status: **not yet answered.**
 
 ## Review focus
