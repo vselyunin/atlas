@@ -204,6 +204,9 @@ export function registerGateway(
             case 'session.exit':
               sessions.onExit(workerId, message.payload);
               break;
+            case 'session.activity':
+              sessions.onActivity(workerId, message.payload);
+              break;
             case 'protocol.error':
               request.log.info({ requestId: request.id }, 'Worker reported a protocol error');
               break;

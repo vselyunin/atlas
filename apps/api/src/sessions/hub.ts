@@ -1,15 +1,20 @@
 import { randomUUID } from 'node:crypto';
 import {
-  AGENT_SESSION_CAPABILITY,
+  AGENT_SESSION_STATUS_CAPABILITY,
+  DEFAULT_SESSION_SIZE,
   MAX_SESSION_PROMPT_CHARS,
   PROTOCOL_VERSION,
 } from '@atlas/contracts';
 import type {
   ApiToBoardSessionMessage,
+  SessionActivity,
+  SessionActivityDetail,
+  SessionActivityPayload,
   SessionExit,
   SessionOutput,
   SessionStarted,
   SessionState,
+  SessionSummary,
   TerminalSize,
 } from '@atlas/contracts';
 import { eq } from 'drizzle-orm';
@@ -19,6 +24,7 @@ import { tasks, workers } from '../db/schema.js';
 import { ApiError } from '../http/errors.js';
 import { getProject } from '../projects/service.js';
 import type { WorkerRegistry } from '../workers/registry.js';
+import { summarize } from './status.js';
 
 // Spike: sessions live in memory only. The task id is the session id.
 
@@ -32,8 +38,22 @@ interface Session {
   worktreePath: string | null;
   exitCode: number | null;
   message: string | null;
+  activity: SessionActivity | null;
+  detail: SessionActivityDetail | null;
+  stopped: boolean;
+  // Set when the Worker restarted without the session; reported by a later sync.
+  lost: boolean;
+  // When the task's summary last changed.
+  since: string;
   chunks: string[];
   size: number;
+}
+
+// A start on a move that the API refused, kept until the next start or until the task leaves
+// Working.
+interface FailedStart {
+  message: string;
+  since: string;
 }
 
 // The close code for a socket whose sign-in session ended.
@@ -46,6 +66,7 @@ interface Watch {
 
 export class SessionHub {
   private readonly sessions = new Map<string, Session>();
+  private readonly failedStarts = new Map<string, FailedStart>();
   private readonly viewers = new Map<string, Set<WebSocket>>();
   // Signed-in sockets by user, each with its session check and the timer that repeats it.
   private readonly watched = new Map<string, Map<WebSocket, Watch>>();
@@ -134,9 +155,10 @@ export class SessionHub {
     }
     const { workerId, relativePath } = project.repository;
     const worker = this.context.db.select().from(workers).where(eq(workers.id, workerId)).get();
+    // A Worker that reports session status also runs sessions, so one check covers both.
     if (
       worker?.availability === 'online' &&
-      !worker.capabilities.includes(AGENT_SESSION_CAPABILITY)
+      !worker.capabilities.includes(AGENT_SESSION_STATUS_CAPABILITY)
     ) {
       throw new ApiError(
         409,
@@ -171,10 +193,65 @@ export class SessionHub {
       worktreePath: null,
       exitCode: null,
       message: null,
+      activity: null,
+      detail: null,
+      stopped: false,
+      lost: false,
+      since: this.context.now(),
       chunks: [],
       size: 0,
     });
+    this.failedStarts.delete(taskId);
     this.broadcast(taskId, this.snapshot(taskId));
+  }
+
+  // Starts the task's session after a move into Working. A refusal is recorded for the task
+  // instead of failing the move; a project without a checkout records nothing.
+  startForMove(taskId: string): void {
+    try {
+      this.start(taskId, DEFAULT_SESSION_SIZE);
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'no_checkout') return;
+      this.failedStarts.set(taskId, {
+        message: error instanceof ApiError ? error.message : 'Unexpected session error',
+        since: this.context.now(),
+      });
+      this.broadcast(taskId, this.snapshot(taskId));
+    }
+  }
+
+  clearFailedStart(taskId: string): void {
+    if (this.failedStarts.delete(taskId)) this.broadcast(taskId, this.snapshot(taskId));
+  }
+
+  summary(taskId: string): SessionSummary {
+    const session = this.sessions.get(taskId);
+    const failedStart = this.failedStarts.get(taskId);
+    return summarize({
+      session,
+      failedStart,
+      workerOnline: session ? this.registry.isOnline(session.workerId) : false,
+      // Only a task with neither needs the database.
+      hasCheckout: session || failedStart ? true : this.hasCheckout(taskId),
+    });
+  }
+
+  // The summaries of the tasks that have a status to show.
+  summaries(taskIds: string[]): Array<{ taskId: string } & SessionSummary> {
+    return taskIds
+      .map((taskId) => ({ taskId, ...this.summary(taskId) }))
+      .filter(({ status }) => status !== 'none');
+  }
+
+  private hasCheckout(taskId: string): boolean {
+    const task = this.context.db
+      .select({ projectId: tasks.projectId })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .get();
+    if (!task) return false;
+    const project = getProject(this.context.db, task.projectId);
+    return project.repository.mode === 'local' && project.state === 'ready';
   }
 
   input(taskId: string, data: string): void {
@@ -215,9 +292,14 @@ export class SessionHub {
     { sessionId, runId, branch, worktreePath }: SessionStarted['payload'],
   ) {
     const session = this.owned(workerId, sessionId, runId);
-    if (!session) return;
-    Object.assign(session, { state: 'running', branch, worktreePath });
-    this.broadcast(sessionId, this.snapshot(sessionId));
+    if (!session || session.state === 'exited') return;
+    this.update(sessionId, session, { state: 'running', branch, worktreePath });
+  }
+
+  onActivity(workerId: string, { sessionId, runId, activity, detail }: SessionActivityPayload) {
+    const session = this.owned(workerId, sessionId, runId);
+    if (!session || session.state === 'exited') return;
+    this.update(sessionId, session, { activity, detail });
   }
 
   onOutput(workerId: string, { sessionId, runId, data }: SessionOutput['payload']) {
@@ -231,11 +313,31 @@ export class SessionHub {
     this.broadcast(sessionId, { type: 'output', data });
   }
 
-  onExit(workerId: string, { sessionId, runId, exitCode, message }: SessionExit['payload']) {
+  onExit(
+    workerId: string,
+    { sessionId, runId, exitCode, message, stopped }: SessionExit['payload'],
+  ) {
     const session = this.owned(workerId, sessionId, runId);
     if (!session || session.state === 'exited') return;
-    Object.assign(session, { state: 'exited', exitCode, message });
-    this.broadcast(sessionId, this.snapshot(sessionId));
+    this.update(sessionId, session, {
+      state: 'exited',
+      exitCode,
+      message,
+      stopped: stopped ?? false,
+    });
+  }
+
+  // Applies a change to a session, moves `since` when the summary changes, and tells the Board.
+  private update(taskId: string, session: Session, changes: Partial<Session>) {
+    const before = this.summaryWithoutSince(taskId);
+    Object.assign(session, changes);
+    if (this.summaryWithoutSince(taskId) !== before) session.since = this.context.now();
+    this.broadcast(taskId, this.snapshot(taskId));
+  }
+
+  private summaryWithoutSince(taskId: string) {
+    const { status, reason, message, exitCode } = this.summary(taskId);
+    return JSON.stringify([status, reason, message, exitCode]);
   }
 
   private owned(workerId: string, taskId: string, runId: string) {
@@ -253,13 +355,18 @@ export class SessionHub {
 
   private snapshot(taskId: string): ApiToBoardSessionMessage {
     const session = this.sessions.get(taskId);
+    const { status, reason, since, message } = this.summary(taskId);
     return {
       type: 'session',
       state: session?.state ?? 'none',
       branch: session?.branch ?? null,
       worktreePath: session?.worktreePath ?? null,
       exitCode: session?.exitCode ?? null,
-      message: session?.message ?? null,
+      // Without a session the summary's message is the reason a start was refused.
+      message: session ? session.message : message,
+      status,
+      reason,
+      since,
     };
   }
 

@@ -8,7 +8,12 @@ import { WORKER_TOKEN } from './auth-app.js';
 // A Worker driven by hand over the real Worker socket. Every message from the API is kept until
 // a test takes it with `next`, so no message is lost between steps.
 
-export const ALL_CAPABILITIES = ['repository.init', 'agent.session', 'repository.clone'] as const;
+export const ALL_CAPABILITIES = [
+  'repository.init',
+  'agent.session',
+  'repository.clone',
+  'agent.session.status',
+] as const;
 export const NO_CLONE_CAPABILITIES = ['repository.init', 'agent.session'] as const;
 
 export type FakeWorkerOptions = {

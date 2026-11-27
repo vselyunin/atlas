@@ -11,12 +11,17 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { ApiContext } from '../db/client.js';
 import { parseInput } from '../http/errors.js';
+import type { SessionHub } from '../sessions/hub.js';
 import { createTask, listTasks, moveTask, patchTask } from './service.js';
 
 const VersionParams = z.strictObject({ projectId: IdSchema, versionId: IdSchema });
 const TaskParams = z.strictObject({ taskId: IdSchema });
 
-export function registerTaskRoutes(app: FastifyInstance, context: ApiContext) {
+export function registerTaskRoutes(
+  app: FastifyInstance,
+  context: ApiContext,
+  sessions: SessionHub,
+) {
   const scoped = `${API_BASE_PATH}/projects/:projectId/versions/:versionId/tasks`;
   app.get(scoped, (request) => {
     const { projectId, versionId } = parseInput(VersionParams, request.params);
@@ -41,8 +46,17 @@ export function registerTaskRoutes(app: FastifyInstance, context: ApiContext) {
   });
   app.post(`${API_BASE_PATH}/tasks/:taskId/move`, (request) => {
     const { taskId } = parseInput(TaskParams, request.params);
-    return TaskResponseSchema.parse({
-      task: moveTask(context, taskId, parseInput(TaskMoveSchema, request.body)),
-    });
+    const { task, previousStatus } = moveTask(
+      context,
+      taskId,
+      parseInput(TaskMoveSchema, request.body),
+    );
+    // The move is committed. Entering Working starts the session; leaving it drops a refused
+    // start. Neither changes the response.
+    if (previousStatus !== 'working' && task.status === 'working') sessions.startForMove(task.id);
+    if (previousStatus === 'working' && task.status !== 'working') {
+      sessions.clearFailedStart(task.id);
+    }
+    return TaskResponseSchema.parse({ task });
   });
 }

@@ -145,7 +145,7 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     registerProjectRoutes(app, context, registry, broker, projectGithub);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);
-    registerTaskRoutes(app, context);
+    registerTaskRoutes(app, context, sessions);
     registerOperationRoutes(app, context);
     registerSessionRoutes(app, sessions, allowedOrigin, appFile ? authSessions : undefined);
     registerGateway(app, context, registry, workerToken, sessions, broker);
