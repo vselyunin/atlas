@@ -158,6 +158,9 @@ describe('board session messages', () => {
       worktreePath: null,
       exitCode: null,
       message: null,
+      status: 'none',
+      reason: 'none',
+      since: null,
     });
     for (const state of ['none', 'starting', 'running', 'exited']) {
       expect(ApiToBoardSessionMessageSchema.safeParse(session(state)).success).toBe(true);

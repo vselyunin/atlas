@@ -8,6 +8,8 @@ import {
 } from './common.js';
 import { API_BASE_PATH } from './http.js';
 import {
+  SessionActivityPayloadSchema,
+  SessionSyncPayloadSchema,
   SessionExitPayloadSchema,
   SessionInputPayloadSchema,
   SessionOutputPayloadSchema,
@@ -19,6 +21,7 @@ import {
 import { GithubFullNameSchema } from './github.js';
 import {
   AGENT_SESSION_CAPABILITY,
+  AGENT_SESSION_STATUS_CAPABILITY,
   REPOSITORY_CLONE_CAPABILITY,
   REPOSITORY_INIT_CAPABILITY,
 } from './workers.js';
@@ -59,6 +62,12 @@ export const WorkerRegisterSchema = z.strictObject({
         z.literal(REPOSITORY_INIT_CAPABILITY),
         z.literal(AGENT_SESSION_CAPABILITY),
         z.literal(REPOSITORY_CLONE_CAPABILITY),
+      ]),
+      z.tuple([
+        z.literal(REPOSITORY_INIT_CAPABILITY),
+        z.literal(AGENT_SESSION_CAPABILITY),
+        z.literal(REPOSITORY_CLONE_CAPABILITY),
+        z.literal(AGENT_SESSION_STATUS_CAPABILITY),
       ]),
     ]),
   }),
@@ -201,6 +210,16 @@ export const SessionExitSchema = z.strictObject({
   type: z.literal('session.exit'),
   payload: SessionExitPayloadSchema,
 });
+export const SessionActivityMessageSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.activity'),
+  payload: SessionActivityPayloadSchema,
+});
+export const SessionSyncMessageSchema = z.strictObject({
+  ...envelope,
+  type: z.literal('session.sync'),
+  payload: SessionSyncPayloadSchema,
+});
 
 export const WorkerToApiMessageSchema = z.discriminatedUnion('type', [
   WorkerRegisterSchema,
@@ -212,6 +231,8 @@ export const WorkerToApiMessageSchema = z.discriminatedUnion('type', [
   SessionStartedSchema,
   SessionOutputSchema,
   SessionExitSchema,
+  SessionActivityMessageSchema,
+  SessionSyncMessageSchema,
 ]);
 
 export const ApiToWorkerMessageSchema = z.discriminatedUnion('type', [
@@ -230,6 +251,8 @@ export const ApiToWorkerMessageSchema = z.discriminatedUnion('type', [
 export type SessionStarted = z.infer<typeof SessionStartedSchema>;
 export type SessionOutput = z.infer<typeof SessionOutputSchema>;
 export type SessionExit = z.infer<typeof SessionExitSchema>;
+export type SessionActivityMessage = z.infer<typeof SessionActivityMessageSchema>;
+export type SessionSyncMessage = z.infer<typeof SessionSyncMessageSchema>;
 
 export type WorkerRegister = z.infer<typeof WorkerRegisterSchema>;
 export type WorkerRegistered = z.infer<typeof WorkerRegisteredSchema>;
