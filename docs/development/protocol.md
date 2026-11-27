@@ -4,19 +4,20 @@ The API defaults to port 4310 and the Board to port 5173. HTTP uses `/api/v1` an
 
 ## HTTP
 
-| Method | Path under `/api/v1`                             | Request body                                                    | Success body                                       |
-| ------ | ------------------------------------------------ | --------------------------------------------------------------- | -------------------------------------------------- |
-| GET    | `/projects`                                      |                                                                 | `{items: Project[]}`                               |
-| GET    | `/projects/:projectId`                           |                                                                 | `{project: Project}`                               |
-| POST   | `/projects`                                      | `{name, repository}`                                            | `{project: Project, operation: Operation \| null}` |
-| GET    | `/projects/:projectId/versions`                  |                                                                 | `{items: Version[]}`                               |
-| POST   | `/projects/:projectId/versions`                  | `{name}`                                                        | `{version: Version}`                               |
-| GET    | `/workers`                                       |                                                                 | `{items: Worker[]}`                                |
-| GET    | `/projects/:projectId/versions/:versionId/tasks` |                                                                 | `{items: Task[]}`                                  |
-| POST   | `/projects/:projectId/versions/:versionId/tasks` | `{title, description?, type?, priority?, assigneeId?, status?}` | `{task: Task}`                                     |
-| PATCH  | `/tasks/:taskId`                                 | `{expectedRevision, changes}`                                   | `{task: Task}`                                     |
-| POST   | `/tasks/:taskId/move`                            | `{expectedRevision, status, beforeTaskId}`                      | `{task: Task}`                                     |
-| GET    | `/operations/:operationId`                       |                                                                 | `{operation: Operation}`                           |
+| Method | Path under `/api/v1`                                | Request body                                                    | Success body                                               |
+| ------ | --------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| GET    | `/projects`                                         |                                                                 | `{items: Project[]}`                                       |
+| GET    | `/projects/:projectId`                              |                                                                 | `{project: Project}`                                       |
+| POST   | `/projects`                                         | `{name, repository}`                                            | `{project: Project, operation: Operation \| null}`         |
+| GET    | `/projects/:projectId/versions`                     |                                                                 | `{items: Version[]}`                                       |
+| POST   | `/projects/:projectId/versions`                     | `{name}`                                                        | `{version: Version}`                                       |
+| GET    | `/workers`                                          |                                                                 | `{items: Worker[]}`                                        |
+| GET    | `/projects/:projectId/versions/:versionId/tasks`    |                                                                 | `{items: Task[]}`                                          |
+| GET    | `/projects/:projectId/versions/:versionId/sessions` |                                                                 | `{items: {taskId,status,reason,message,exitCode,since}[]}` |
+| POST   | `/projects/:projectId/versions/:versionId/tasks`    | `{title, description?, type?, priority?, assigneeId?, status?}` | `{task: Task}`                                             |
+| PATCH  | `/tasks/:taskId`                                    | `{expectedRevision, changes}`                                   | `{task: Task}`                                             |
+| POST   | `/tasks/:taskId/move`                               | `{expectedRevision, status, beforeTaskId}`                      | `{task: Task}`                                             |
+| GET    | `/operations/:operationId`                          |                                                                 | `{operation: Operation}`                                   |
 
 Successful project creation returns 201 for an existing repository and 202 for local provisioning. Task and version creation return 201. The other successful HTTP routes return 200.
 
@@ -65,6 +66,8 @@ To append to a different column, send a move with a null anchor.
 ```
 
 To insert before another task, pass its ID. The anchor must belong to the moved task's project and version and to the destination status. A missing or stale anchor returns 409. A self-anchor is a no-op after the revision check. A same-column no-op may retain its revision. The API serializes moves transactionally, compacts positions in affected columns, and increments revisions for changed tasks. Position is zero-based within project, version and status. Refetch affected task lists after mutations.
+
+A move that changes a task's status to `working` from another status also starts the task's agent session once the move is committed; see [Start on move](#start-on-move). The move's response and status code do not depend on it.
 
 The optional creation status extends the HTTP request only. Existing callers that omit it remain compatible; deploy the updated API before a Board that sends it, since older strict validators reject it. Persisted task rows and Worker messages are unchanged; no database migration or Worker protocol version change is needed.
 
@@ -204,12 +207,13 @@ A Worker whose user may not change file permissions in its workspace fails `repo
 
 ### Capabilities
 
-A Worker registers with `["repository.init"]`, `["repository.init","agent.session"]` or `["repository.init","agent.session","repository.clone"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it. The third form was added with cloning.
+A Worker registers with one of four lists, each the one before plus one entry: `["repository.init"]`, `["repository.init","agent.session"]`, `["repository.init","agent.session","repository.clone"]` or `["repository.init","agent.session","repository.clone","agent.session.status"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions, the third with cloning and the fourth with session start on move, resume and status. A Worker that registers the fourth form sends `session.activity` and `session.sync`, decides itself between a first run and a resume of a task's agent, and marks task worktrees trusted for Claude. A Worker that sends an older form still registers.
 
 Compatibility in both directions:
 
-- An older API refuses a newer Worker's registration, because its validator does not know the third list. Update the API before the Worker.
-- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message.
+- An older API refuses a newer Worker's registration, because its validator does not know the fourth list (or, for an API older still, the third). Update the API before the Worker.
+- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message. It starts no agent session on an online Worker without `agent.session.status`, neither on a move nor from the Board's button: the start is refused with 409 `sessions_unsupported` and the message "The project worker is too old to run agent sessions". On a move this is recorded as a refused start, see [Start on move](#start-on-move). An older Worker would send the task prompt on every start and so run the task again.
+- The `session` message to the Board gains fields and the Board validates it strictly, and the sessions route is new, so deploy the Board and the API together.
 
 ### Clone and credentials
 
@@ -259,21 +263,47 @@ Compatibility of this part: `githubRepositoryId` is new and the create request i
 
 ## Agent sessions
 
-The session messages are covered by contract tests, API hub and socket tests, Worker session tests, an integration test with a stand-in agent and the Docker test group; `docs/development/acceptance.md` lists them. A session runs an agent CLI in a terminal on the Worker, inside a Git worktree made for one task. The task ID is the session ID, so a task has at most one session. Sessions live in memory: they end when the Worker stops, and the API forgets them when it restarts.
+The messages are described in the contracts as `SessionActivityMessageSchema`, `SessionSyncMessageSchema` and `SessionActivitySchema`, next to the earlier session schemas. The session messages are covered by contract tests, API hub and socket tests, Worker session tests, an integration test with a stand-in agent and the Docker test group; `docs/development/acceptance.md` lists them. A session runs an agent CLI in a terminal on the Worker, inside a Git worktree made for one task. The task ID is the session ID, so a task has at most one session. Sessions live in memory: they end when the Worker stops, and the API forgets them when it restarts, and learns of the ones still running from the Worker's next `session.sync`.
 
-Every session message carries the usual envelope and no `commandId`. Each payload has `sessionId` and `runId`. The API creates a new `runId` for every start and ignores Worker messages whose `runId` is not the current one.
+Every session message carries the usual envelope and no `commandId`. Each payload has `sessionId` and `runId`, except `session.sync`, which lists sessions. The API creates a new `runId` for every start and ignores Worker messages whose `runId` is not the current one.
 
-| Direction    | Type              | Payload besides `sessionId` and `runId`     |
-| ------------ | ----------------- | ------------------------------------------- |
-| API → Worker | `session.start`   | `{projectId,relativePath,prompt,cols,rows}` |
-| API → Worker | `session.input`   | `{data}`, at most 8,192 characters          |
-| API → Worker | `session.resize`  | `{cols,rows}`                               |
-| API → Worker | `session.stop`    | none                                        |
-| Worker → API | `session.started` | `{worktreePath,branch}`                     |
-| Worker → API | `session.output`  | `{data}`, at most 16,000 characters         |
-| Worker → API | `session.exit`    | `{exitCode,message}`, both nullable         |
+| Direction    | Type               | Payload besides `sessionId` and `runId`                                          |
+| ------------ | ------------------ | -------------------------------------------------------------------------------- |
+| API → Worker | `session.start`    | `{projectId,relativePath,prompt,cols,rows}`                                      |
+| API → Worker | `session.input`    | `{data}`, at most 8,192 characters                                               |
+| API → Worker | `session.resize`   | `{cols,rows}`                                                                    |
+| API → Worker | `session.stop`     | none                                                                             |
+| Worker → API | `session.started`  | `{worktreePath,branch}`                                                          |
+| Worker → API | `session.output`   | `{data}`, at most 16,000 characters                                              |
+| Worker → API | `session.exit`     | `{exitCode,message,stopped?}`; `exitCode` and `message` nullable                 |
+| Worker → API | `session.activity` | `{activity,detail}`; see [Session activity](#session-activity)                   |
+| Worker → API | `session.sync`     | `{sessions,exits}`, no `sessionId` or `runId`; see [Session sync](#session-sync) |
 
 The Worker answers `session.start` for a session it already runs with `session.started` and adopts the new `runId`, so a restarted API can attach again. It answers input or a stop for a session it does not run with `session.exit`. Output produced while the Worker is disconnected is dropped.
+
+`session.start` keeps its shape, but the meaning of `prompt` changed. The API sends the task's prompt on every start and the Worker decides what to do with it. It keeps a small record per task in its state directory and passes the prompt to the agent only on the task's first run. A later start of the same task resumes the agent's earlier conversation and sends no prompt (Claude), or starts the agent with no prompt (Codex). A custom agent command is never given the prompt. See "Agent sandbox" in `docs/development/local-setup.md` for the three cases and their notices. The record survives a Worker restart.
+
+`session.exit` has a new optional field `stopped`. The Worker sets it to `true` when the user's stop ended the session, including a stop before the agent started, so the API shows a stopped session as ended and not as a failure. A Worker that omits it is read as `false`.
+
+### Session activity
+
+`session.activity` reports what the agent is doing. `activity` is `working`, `needs_input`, `idle` or `error`. `detail` is `null` or one of these codes, never free text: `asked_in_text`, `resumed`, `rate_limit`, `authentication_failed`, `billing_error`, `invalid_request`, `server_error`, `max_output_tokens`, `unknown`. The API ignores it for a run that is not the current one or has exited. Only Claude reports activity; the Worker reads it from hooks (see "Agent sandbox" in `docs/development/local-setup.md`). A session with no report counts as working. A Claude run that starts without the task prompt reports `idle` with the detail `resumed` before the agent has been asked anything.
+
+### Session sync
+
+After it registers, and before it replays unacknowledged command results, the Worker sends `session.sync` with `{sessions, exits}`. `sessions` lists every session it is running or still starting (at most 500), each with `sessionId`, `runId`, `state` (`starting` or `running`), `worktreePath`, `branch`, `activity` and `detail` (the last four may be `null`). `exits` holds the `session.exit` payloads it could not send while disconnected (at most 500; the oldest are dropped first). The API applies the message in this order:
+
+1. The exits, as if they had just arrived. A session that ended cleanly while the Worker was away is shown as ended, not as lost.
+2. The listed sessions. One the API holds as live, for the same Worker, takes the listed run ID and activity, and a `starting` session reported as running takes its worktree and branch. One of another Worker is skipped. A listed session the API holds as exited is not revived when it has the same `runId`; with another `runId` it is replaced by the listed session. A listed session the API does not know is adopted, with an empty output replay, when the task exists and its project's checkout is on this Worker. This is how the Board's dots return after an API restart.
+3. Lost marking. Every other live session the API holds for that Worker is ended with exit code `null` and the message "The Worker restarted and the session was lost", and shown as a problem. This applies only to sessions that started before the Worker's latest registration, so a session started after it registered, and not yet in the Worker's list, is left alone. A late `session.started` never revives an ended session.
+
+While a Worker is not connected, the API shows its live sessions as a problem with "Worker offline". When the Worker registers again they return to their reported status.
+
+### Start on move
+
+When `POST /tasks/:taskId/move` changes a task's status to `working` from another status, the API starts the task's session after the move is committed, with a default terminal size of 120 columns by 30 rows (`DEFAULT_SESSION_SIZE`); the Board sends its real size when it connects. Reordering inside Working starts nothing. Moving a task back into Working while its session is live starts nothing; if its session has ended, the move starts it again and the Worker resumes it. A start for a task whose session is starting or running does nothing, so a move and a click that arrive together give one session.
+
+If the API refuses the start (the Worker is offline, or too old, or an unexpected error), the move still succeeds. The API records for the task that the session did not start and why, shown as a problem with the reason `not_started` and the refusal's message, for example "The project worker is offline". The record is replaced by the next start and dropped when the task leaves Working. It is shown over an older ended session and held in memory only. A project that is not a ready local project has no checkout on a Worker: a move records nothing for it and its status reason is `no_checkout`.
 
 The Worker creates the worktree at `<workspaceRoot>/.atlas-worktrees/<encoded relativePath>/<task ID>` on branch `atlas/task-<task ID>` and reuses it on later starts. The agent command is `claude` unless `ATLAS_AGENT_COMMAND` is set on the Worker. The agent and Git run without any `ATLAS_*` environment variables. Unless `ATLAS_AGENT_SANDBOX=off`, the Worker runs the agent inside a sandbox and first writes one line about it to the terminal; see `docs/development/local-setup.md`. This adds no messages.
 
@@ -281,14 +311,34 @@ The Worker creates the worktree at `<workspaceRoot>/.atlas-worktrees/<encoded re
 
 The Board opens a WebSocket at `/api/v1/tasks/:taskId/session`. The API accepts it only when the `Origin` header equals the configured Board origin. Frames are JSON without an envelope.
 
-| Direction   | Message                                                       |
-| ----------- | ------------------------------------------------------------- |
-| Board → API | `{type:"start",cols,rows}`                                    |
-| Board → API | `{type:"input",data}`                                         |
-| Board → API | `{type:"resize",cols,rows}`                                   |
-| Board → API | `{type:"stop"}`                                               |
-| API → Board | `{type:"session",state,branch,worktreePath,exitCode,message}` |
-| API → Board | `{type:"output",data}`                                        |
-| API → Board | `{type:"error",message}`                                      |
+| Direction   | Message                                                                           |
+| ----------- | --------------------------------------------------------------------------------- |
+| Board → API | `{type:"start",cols,rows}`                                                        |
+| Board → API | `{type:"input",data}`                                                             |
+| Board → API | `{type:"resize",cols,rows}`                                                       |
+| Board → API | `{type:"stop"}`                                                                   |
+| API → Board | `{type:"session",state,branch,worktreePath,exitCode,message,status,reason,since}` |
+| API → Board | `{type:"output",data}`                                                            |
+| API → Board | `{type:"error",message}`                                                          |
 
-`state` is `none`, `starting`, `running` or `exited`. On connect the API sends the current `session` message and then replays up to 400,000 characters of recent output. A session can start only for a task in a ready project that a Worker initialized locally.
+`state` is `none`, `starting`, `running` or `exited`. `status`, `reason` and `since` are new; the Board validates the message strictly. On connect the API sends the current `session` message and then replays up to 400,000 characters of recent output. A session can start only for a task in a ready project that a Worker initialized locally. A `start` for a task whose session is starting or running does nothing.
+
+### Session status
+
+The API derives one status for a task from its session's state, its activity and a refused start. A refused start is newer than an ended session and is shown over it; an ended session is shown before the Worker's connection or activity are looked at.
+
+| `status`      | `reason`                                    | When                                                                                                                  |
+| ------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `none`        | `none`, `no_checkout`                       | No session and no refused start. `no_checkout`: the project has no ready checkout on a Worker                         |
+| `problem`     | `not_started`                               | The start was refused and is newer than any session                                                                   |
+| `problem`     | `worker_lost`, `start_failed`, `exit_error` | The session was lost; it ended with no exit code; it ended with a nonzero exit code                                   |
+| `ended`       | `stopped`, `exited`                         | The user's stop ended it; it ended with exit code 0 (the message about copying commits, if any, is kept in `message`) |
+| `problem`     | `worker_offline`                            | The session is live and its Worker is not connected                                                                   |
+| `working`     | `starting`, `working`                       | Starting; running with activity `working` or no report                                                                |
+| `problem`     | `api_error`                                 | Running, activity `error`; `message` holds the detail code                                                            |
+| `needs_input` | `dialog`, `asked_in_text`                   | Running, activity `needs_input`; `asked_in_text` when its detail is that                                              |
+| `finished`    | `finished`, `resumed`                       | Running, activity `idle`; `resumed` when its detail is that                                                           |
+
+`since` is the API's clock time of the last change of the status, `null` when there is no session. `message` carries the refusal's text, an exit message or an error detail code, and is never the agent's output or last message. A session with `exitCode` `null` and a message (a failed start, a lost session) is a problem; one with exit code 0 is `ended`.
+
+`GET /projects/:projectId/versions/:versionId/sessions` returns `{items: {taskId,status,reason,message,exitCode,since}[]}` for the tasks of that version that have a session or a refused start; the other tasks are left out. It needs a session while sign-in is on, like the tasks list. The Board polls it for the dot on each card.

@@ -33,7 +33,8 @@ Default local state is in the ignored `.atlas/` directory:
 
 - `atlas.sqlite`: projects, versions, tasks and operations.
 - `projects/`: new project repositories created by the Worker.
-- `worker/`: Worker lock and durable command journal. The lock file holds `<pid> <token>`;
+- `worker/`: Worker lock, durable command journal and the per-task session records (see
+  "Starting, resuming and status"). The lock file holds `<pid> <token>`;
   a lock left by a container that was killed hard is taken over on the next start. The lock
   keeps two Workers apart only when they share a PID namespace; it does not keep a native
   Worker and the container Worker apart (see "What the sandbox does not protect").
@@ -498,14 +499,16 @@ The Worker wraps every agent in the sandbox runtime `@anthropic-ai/sandbox-runti
   `.git/refs/heads/atlas` and `.git/logs`;
 - its own login and state paths. For Claude these are `~/.claude`, `~/.claude.json` and
   `/tmp/claude`. The Worker creates the folders (`~/.claude` and `/tmp/claude`) before it
-  starts the sandbox, because the sandbox can make only an existing folder writable.
+  starts the sandbox, because the sandbox can make only an existing folder writable;
+- for Claude, its own status folder, described under "Starting, resuming and status".
 
 It cannot read the Worker state directory and reaches only the servers its profile allows:
 for Claude `api.anthropic.com`, `*.anthropic.com`, `claude.ai`, `*.claude.ai` and
 `*.claude.com`. Because the sandbox enforces this, Claude starts with
-`--dangerously-skip-permissions`, so the Board shows its permission-bypass warning. It still
-asks the folder-trust question and real questions about the task; answer them on the Board.
-When a session starts, the terminal first shows `Atlas: agent sandbox on...`.
+`--dangerously-skip-permissions`, so the Board shows its permission-bypass warning. It no longer asks the folder-trust
+question for a task worktree, because the Worker records the trust first (see "Trusting task
+worktrees"); with `ATLAS_AGENT_SANDBOX=off` Claude still asks. It also asks real questions
+about the task; answer them on the Board. When a session starts, the terminal first shows `Atlas: agent sandbox on...`.
 
 If `srt` or its prerequisites are missing, or the sandbox does not start, the session ends
 with a message naming the cause and the agent is not started.
@@ -563,6 +566,102 @@ name. What this means in use:
   or clones inside the worktree, whose objects then land in the agent's object folder.
 
 Codex is in the image but has not been verified under the sandbox. Treat it as unverified.
+
+### Starting, resuming and status
+
+Moving a task into Working starts its agent session (see "Start on move" in
+`docs/development/protocol.md`). The task panel then offers "Connect" while the session runs, and
+"Start session" or "Resume session" for a Working task whose session did not start or has ended.
+If the Worker is offline or too old, the move still succeeds and the card shows a red dot with the
+reason. A project with no checkout on a Worker starts nothing and shows no dot.
+
+**Prompt once, then resume.** The task prompt reaches the agent once per task. The Worker keeps a
+small record per task in `session-records/` of its state directory, which the agent cannot read: an
+agent session ID and whether the prompt was delivered. The record survives a Worker restart. For
+Claude a start is one of three cases, and the terminal says which in one line after the sandbox
+line:
+
+- First run: there is no record, or the prompt was never delivered. The Worker starts Claude with
+  `--session-id <uuid>` and the prompt and records the ID. The line is "Atlas: first run, the task
+  prompt was sent."
+- Resume: the prompt was delivered and Claude still has the conversation. The Worker starts
+  `claude --resume <uuid>` with no prompt. The line is "Atlas: resumed the earlier conversation; the
+  task prompt was not sent again."
+- Conversation gone: the prompt was delivered but Claude no longer has the conversation (Claude
+  removes old ones, and the agent home can be replaced). The Worker starts Claude with no prompt and a
+  new session ID. The line is "Atlas: the earlier conversation is gone; started without the task
+  prompt." The task is not run again; tell the agent what to do.
+
+The prompt counts as delivered once the Worker has seen the saved conversation, which it looks for
+at `~/.claude/projects/<project>/<id>.jsonl` when a session ends and before the next start. A first
+run that dies before Claude saved anything (an expired login, a crash, an immediate Stop) is
+therefore followed by another first run with the prompt. A run without the prompt is shown as finished
+(resumed) until you type, because no hook fires before then. A description edited after the first run does not
+reach the agent.
+
+Codex and custom commands are unverified. For Codex the prompt counts as delivered once the process
+has started; a later start runs Codex again with no prompt and no history, and the terminal says
+"Atlas: this agent was started for the task before; the task prompt was not sent again." A custom
+command (`ATLAS_AGENT_COMMAND`) is never given the task prompt and gets no notice. Neither reports
+activity, so the dot stays "working" while their process runs.
+
+**Trusting task worktrees.** Before it starts Claude in a task worktree in a sandboxed session, the
+Worker sets `projects["<worktree path>"].hasTrustDialogAccepted` to `true` in `~/.claude.json` in
+the agent's home, so Claude does not ask whether to trust the folder. This applies only to the
+worktree path the Worker created under `.atlas-worktrees`, and only when the session runs in the
+sandbox: with `ATLAS_AGENT_SANDBOX=off` the Worker writes nothing and Claude asks as before. The
+sandbox makes that one file writable, not the home folder, so the Worker changes the file in place
+and keeps every other key. The agent can write the file too, so the Worker treats it as untrusted:
+it must be a regular file of at most 5 MiB that parses as a JSON object, or it is left alone. After
+writing, the Worker reads the file back, and restores the original content if the check fails. When
+the file is missing or unusable the agent still starts and Claude asks as before. Nothing from the
+file is logged.
+
+What trust means: Claude loads the repository's own Claude settings, hooks and MCP servers without
+asking. They run inside the sandbox with the same limits as the agent, which already runs with its
+permission prompts off. This applies to every repository Atlas runs, as you decided. See also
+"Known limits of linking and cloning": clone only repositories you trust.
+
+**Status.** The Worker passes Claude hooks on its command line (`--settings`); nothing is written
+into the repository or into Claude's settings files. Each hook runs a fixed script that appends one
+short line to a status file. The file is in a folder made for that one session in the container's
+temporary directory, outside the worktree and the Worker state directory. That folder is the only
+extra path the agent may write for status; the script is readable but not writable. The Worker polls
+the file and removes the folder when the session ends. Status works with the sandbox off too. If
+the folder cannot be made, the agent starts without hooks and reports nothing.
+
+| Claude hook event                                       | Activity                                                                       |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `UserPromptSubmit`, `PostToolUse` (every tool)          | `working` (a granted permission clears "needs input")                          |
+| `PreToolUse` for `AskUserQuestion`, `PermissionRequest` | `needs_input`                                                                  |
+| `Stop`                                                  | `idle`, or `needs_input` (`asked_in_text`) when the last message ends with `?` |
+| `StopFailure`                                           | `error`, with the error kind from the hook's input, or `unknown`               |
+
+A line carries the activity and, for an error, its kind, never the agent's message. "Asked in text"
+is a guess from the last character of the agent's last message. `StopFailure` was wired from
+Claude's documentation and has never been seen firing: no API error could be provoked, so treat the
+red dot for a model API error as unverified. The other events were observed with Claude Code 2.1.330
+on 2026-11-27.
+
+The agent can write its own status file, so a misbehaving agent can show a wrong dot on its own
+card; it cannot reach another session's folder. The Worker reads only a regular file of at most
+64 KiB, follows no link, takes whole lines only and ignores any value it does not know. A file that
+stops being a regular file or grows past the limit is not read again.
+
+Limits you will see:
+
+- Claude's own saves to `~/.claude.json` do not stick in the sandbox: the file was last written at
+  the login although sessions ran for days. Writing it in place works, but creating a temporary file
+  next to it and renaming it onto the file both fail with "Read-only file system". Whatever else
+  Claude records there is lost between sessions. The trust record does not depend on this, because
+  the Worker writes in place. The cause was not fixed.
+- After an API restart the cards show no dot until the Worker has reconnected and told the API what
+  it still runs. Sessions that ended before the restart are forgotten, so such a task in Working
+  offers "Start session", which resumes it. Output from before the restart is not replayed.
+- A card's dot can be a few seconds behind (the Board asks every three seconds); the task panel is
+  live.
+- Detailed status exists for Claude only.
+- A task moved out of Working keeps its live session and its dot; stop it from the task.
 
 ## Worker settings
 
