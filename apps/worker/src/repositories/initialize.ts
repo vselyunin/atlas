@@ -32,7 +32,8 @@ const failure = (code: string, message: string, attention = false): CommandOutco
 /**
  * Refuses a target folder that was just made when the Worker may not change modes in it: Git
  * could not write a configuration there. The empty folder is removed again so its name stays free.
- * Returns null when the folder is usable.
+ * Returns null when the folder is usable. A Worker killed between the removal and the journal
+ * write reports the command as `recovery_uncertain` on redelivery, although no folder is left.
  */
 export async function refuseUnusableTarget(
   target: string,
@@ -46,7 +47,7 @@ export async function refuseUnusableTarget(
   return failure(
     WORKSPACE_PERMISSIONS_CODE,
     `${workspacePermissionsMessage(context.root)} ${
-      removed ? 'No folder was created.' : `The empty folder ${target} could not be removed.`
+      removed ? 'No folder was created.' : `The folder ${target} could not be removed.`
     }`,
   );
 }

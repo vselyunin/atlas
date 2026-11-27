@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { chmod, lstat, mkdir, rmdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -20,7 +19,8 @@ export const workspacePermissionsMessage = (root: string) =>
 
 /**
  * Whether the Worker's user may change the mode of a folder it has just made. The mode is set to
- * what it already is, so nothing changes where this is allowed.
+ * what it already is. Where that is allowed nothing changes, except that the kernel drops a
+ * set-group-ID bit inherited from a parent whose group the Worker is not in.
  */
 export async function canChangeMode(
   directory: string,
@@ -38,18 +38,20 @@ export async function canChangeMode(
 
 /**
  * Checks the workspace once with a short-lived folder of its own, whose dot name no project can
- * have. Returns the message to show when repositories cannot be created there, otherwise null.
- * A workspace that cannot be checked at all is left to the commands to report.
+ * have. The name is fixed, so a folder left by a Worker that was killed during the check is used
+ * and removed by the next one. Returns the message to show when repositories cannot be created
+ * there, otherwise null. A workspace that cannot be checked at all is left to the commands to
+ * report.
  */
 export async function workspaceProblem(
   root: string,
   change: ChangeMode = chmod,
 ): Promise<string | null> {
-  const probe = join(root, `.atlas-probe-${randomBytes(6).toString('hex')}`);
+  const probe = join(root, '.atlas-probe');
   try {
     await mkdir(probe);
-  } catch {
-    return null;
+  } catch (error) {
+    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) return null;
   }
   try {
     return (await canChangeMode(probe, change)) ? null : workspacePermissionsMessage(root);
