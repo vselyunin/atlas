@@ -25,7 +25,7 @@ temporary data and separate ports, leaving the personal workspace untouched.
 At the time of writing `pnpm check` runs 60 contract, 111 Worker, 28 API and 41 Board
 tests, plus 10 integration tests. They cover, with a stand-in agent and the sandbox off:
 
-- session message schemas and limits, and the two accepted capability lists;
+- session message schemas and limits, and the accepted capability lists (four forms since session status);
 - Worker sessions and worktrees with real Git and a real PTY, the sandbox settings and
   agent arguments, required mode refusing to start without the sandbox, off mode running
   unwrapped, the Worker lock, the seccomp profile and the Worker configuration;

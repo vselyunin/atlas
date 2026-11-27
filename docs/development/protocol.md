@@ -207,12 +207,12 @@ A Worker whose user may not change file permissions in its workspace fails `repo
 
 ### Capabilities
 
-A Worker registers with one of four lists, each the one before plus one entry: `["repository.init"]`, `["repository.init","agent.session"]`, `["repository.init","agent.session","repository.clone"]` or `["repository.init","agent.session","repository.clone","agent.session.status"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions, the third with cloning and the fourth with session start on move, resume and status. A Worker that registers the fourth form sends `session.activity` and `session.sync`, decides itself between a first run and a resume of a task's agent, and marks task worktrees trusted for Claude. A Worker that sends an older form still registers.
+A Worker registers with one of four lists, each the one before plus one entry: `["repository.init"]`, `["repository.init","agent.session"]`, `["repository.init","agent.session","repository.clone"]` or `["repository.init","agent.session","repository.clone","agent.session.status"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions, the third with cloning and the fourth with session start on move, resume and status. A Worker that registers the fourth form sends `session.activity` and `session.sync`, decides itself between a first run and a resume of a task's agent, and, when its sandbox is on, marks task worktrees trusted for Claude. A Worker that sends an older form still registers.
 
 Compatibility in both directions:
 
 - An older API refuses a newer Worker's registration, because its validator does not know the fourth list (or, for an API older still, the third). Update the API before the Worker.
-- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message. It starts no agent session on an online Worker without `agent.session.status`, neither on a move nor from the Board's button: the start is refused with 409 `sessions_unsupported` and the message "The project worker is too old to run agent sessions". On a move this is recorded as a refused start, see [Start on move](#start-on-move). An older Worker would send the task prompt on every start and so run the task again.
+- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message. It starts no agent session on an online Worker without `agent.session.status`, neither on a move nor from the Board's button: the start is refused with the code `sessions_unsupported` (409) and the message "The project worker is too old to run agent sessions". Over the Board socket the refusal arrives as an `error` message with that text, not as an HTTP status. On a move this is recorded as a refused start, see [Start on move](#start-on-move). An older Worker would send the task prompt on every start and so run the task again.
 - The `session` message to the Board gains fields and the Board validates it strictly, and the sessions route is new, so deploy the Board and the API together.
 
 ### Clone and credentials
@@ -301,7 +301,7 @@ While a Worker is not connected, the API shows its live sessions as a problem wi
 
 ### Start on move
 
-When `POST /tasks/:taskId/move` changes a task's status to `working` from another status, the API starts the task's session after the move is committed, with a default terminal size of 120 columns by 30 rows (`DEFAULT_SESSION_SIZE`); the Board sends its real size when it connects. Reordering inside Working starts nothing. Moving a task back into Working while its session is live starts nothing; if its session has ended, the move starts it again and the Worker resumes it. A start for a task whose session is starting or running does nothing, so a move and a click that arrive together give one session.
+When `POST /tasks/:taskId/move` changes a task's status to `working` from another status, the API starts the task's session after the move is committed, with a default terminal size of 120 columns by 30 rows (`DEFAULT_SESSION_SIZE`); the Board's "Start session" and "Resume session" buttons send the same default size, and an open terminal then sends a `resize` with its real size. Reordering inside Working starts nothing. Moving a task back into Working while its session is live starts nothing; if its session has ended, the move starts it again and the Worker resumes it. A start for a task whose session is starting or running does nothing, so a move and a click that arrive together give one session.
 
 If the API refuses the start (the Worker is offline, or too old, or an unexpected error), the move still succeeds. The API records for the task that the session did not start and why, shown as a problem with the reason `not_started` and the refusal's message, for example "The project worker is offline". The record is replaced by the next start and dropped when the task leaves Working. It is shown over an older ended session and held in memory only. A project that is not a ready local project has no checkout on a Worker: a move records nothing for it and its status reason is `no_checkout`.
 
@@ -327,18 +327,18 @@ The Board opens a WebSocket at `/api/v1/tasks/:taskId/session`. The API accepts 
 
 The API derives one status for a task from its session's state, its activity and a refused start. A refused start is newer than an ended session and is shown over it; an ended session is shown before the Worker's connection or activity are looked at.
 
-| `status`      | `reason`                                    | When                                                                                                                  |
-| ------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| `none`        | `none`, `no_checkout`                       | No session and no refused start. `no_checkout`: the project has no ready checkout on a Worker                         |
-| `problem`     | `not_started`                               | The start was refused and is newer than any session                                                                   |
-| `problem`     | `worker_lost`, `start_failed`, `exit_error` | The session was lost; it ended with no exit code; it ended with a nonzero exit code                                   |
-| `ended`       | `stopped`, `exited`                         | The user's stop ended it; it ended with exit code 0 (the message about copying commits, if any, is kept in `message`) |
-| `problem`     | `worker_offline`                            | The session is live and its Worker is not connected                                                                   |
-| `working`     | `starting`, `working`                       | Starting; running with activity `working` or no report                                                                |
-| `problem`     | `api_error`                                 | Running, activity `error`; `message` holds the detail code                                                            |
-| `needs_input` | `dialog`, `asked_in_text`                   | Running, activity `needs_input`; `asked_in_text` when its detail is that                                              |
-| `finished`    | `finished`, `resumed`                       | Running, activity `idle`; `resumed` when its detail is that                                                           |
+| `status`      | `reason`                                    | When                                                                                                                              |
+| ------------- | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `none`        | `none`, `no_checkout`                       | No session and no refused start. `no_checkout`: the project has no ready checkout on a Worker                                     |
+| `problem`     | `not_started`                               | The start was refused and is newer than any session                                                                               |
+| `problem`     | `worker_lost`, `start_failed`, `exit_error` | The session was lost; it ended with no exit code; it ended with a nonzero exit code                                               |
+| `ended`       | `stopped`, `exited`                         | The user's stop ended it; it ended with exit code 0 (the message about copying commits, if any, is kept in `message`)             |
+| `problem`     | `worker_offline`                            | The session is live and its Worker is not connected                                                                               |
+| `working`     | `starting`, `working`                       | Starting; running with activity `working` or no report                                                                            |
+| `problem`     | `api_error`                                 | Running, activity `error`; `message` holds the detail code (the `StopFailure` hook behind it is unverified, see `local-setup.md`) |
+| `needs_input` | `dialog`, `asked_in_text`                   | Running, activity `needs_input`; `asked_in_text` when its detail is that                                                          |
+| `finished`    | `finished`, `resumed`                       | Running, activity `idle`; `resumed` when its detail is that                                                                       |
 
-`since` is the API's clock time of the last change of the status, `null` when there is no session. `message` carries the refusal's text, an exit message or an error detail code, and is never the agent's output or last message. A session with `exitCode` `null` and a message (a failed start, a lost session) is a problem; one with exit code 0 is `ended`.
+`since` is the API's clock time of the last change of the status, `null` when the status is `none`; a refused start with no session has one. `message` carries the refusal's text, an exit message or an error detail code, and is never the agent's output or last message. A session with `exitCode` `null` and a message (a failed start, a lost session) is a problem; one with exit code 0 is `ended`.
 
 `GET /projects/:projectId/versions/:versionId/sessions` returns `{items: {taskId,status,reason,message,exitCode,since}[]}` for the tasks of that version that have a session or a refused start; the other tasks are left out. It needs a session while sign-in is on, like the tasks list. The Board polls it for the dot on each card.

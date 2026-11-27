@@ -572,12 +572,12 @@ Codex is in the image but has not been verified under the sandbox. Treat it as u
 Moving a task into Working starts its agent session (see "Start on move" in
 `docs/development/protocol.md`). The task panel then offers "Connect" while the session runs, and
 "Start session" or "Resume session" for a Working task whose session did not start or has ended.
-If the Worker is offline or too old, the move still succeeds and the card shows a red dot with the
-reason. A project with no checkout on a Worker starts nothing and shows no dot.
+If the Worker is offline or too old, the move still succeeds and the card shows a red dot; the reason is in the dot's
+tooltip and screen-reader description, and the task panel states it. A project with no checkout on a Worker starts nothing and shows no dot.
 
 **Prompt once, then resume.** The task prompt reaches the agent once per task. The Worker keeps a
-small record per task in `session-records/` of its state directory, which the agent cannot read: an
-agent session ID and whether the prompt was delivered. The record survives a Worker restart. For
+small record per task in `session-records/` of its state directory (which the agent cannot read
+when the sandbox is on): an agent session ID and whether the prompt was delivered. The record survives a Worker restart. For
 Claude a start is one of three cases, and the terminal says which in one line after the sandbox
 line:
 
@@ -612,10 +612,10 @@ worktree path the Worker created under `.atlas-worktrees`, and only when the ses
 sandbox: with `ATLAS_AGENT_SANDBOX=off` the Worker writes nothing and Claude asks as before. The
 sandbox makes that one file writable, not the home folder, so the Worker changes the file in place
 and keeps every other key. The agent can write the file too, so the Worker treats it as untrusted:
-it must be a regular file of at most 5 MiB that parses as a JSON object, or it is left alone. After
-writing, the Worker reads the file back, and restores the original content if the check fails. When
-the file is missing or unusable the agent still starts and Claude asks as before. Nothing from the
-file is logged.
+it must be a regular file of at most 5 MiB that parses as a JSON object, or it is left alone. After writing, the Worker reads the file back and, if the check fails, tries to restore the
+original content. A crash in the middle of a write cannot be undone, because a rename is not
+allowed. When the file is missing or unusable the agent still starts and Claude asks as before.
+Nothing from the file is logged.
 
 What trust means: Claude loads the repository's own Claude settings, hooks and MCP servers without
 asking. They run inside the sandbox with the same limits as the agent, which already runs with its
@@ -628,7 +628,8 @@ short line to a status file. The file is in a folder made for that one session i
 temporary directory, outside the worktree and the Worker state directory. That folder is the only
 extra path the agent may write for status; the script is readable but not writable. The Worker polls
 the file and removes the folder when the session ends. Status works with the sandbox off too. If
-the folder cannot be made, the agent starts without hooks and reports nothing.
+the folder cannot be made, the agent starts without hooks and reports no activity from them; a run
+without the task prompt still reports "finished (resumed)" at its start.
 
 | Claude hook event                                       | Activity                                                                       |
 | ------------------------------------------------------- | ------------------------------------------------------------------------------ |
