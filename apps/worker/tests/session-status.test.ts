@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { appendFile, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -207,6 +207,19 @@ describe('watchStatus', () => {
     const link = join(base, 'link');
     await symlink(target, link);
     watch(link);
+    await sleep(60);
+    expect(seen).toEqual([]);
+  });
+
+  it('does not block on a named pipe and never reads it', async () => {
+    const file = join(base, 'status');
+    execFileSync('mkfifo', [file]);
+    watch(file);
+    await sleep(60);
+    expect(seen).toEqual([]);
+    // The event loop is still free to run the timers.
+    await rm(file);
+    await writeFile(file, 'idle -\n');
     await sleep(60);
     expect(seen).toEqual([]);
   });

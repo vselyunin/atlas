@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { chmod, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { SessionActivityDetailSchema, SessionActivitySchema } from '@atlas/contracts';
@@ -129,21 +129,24 @@ export function watchStatus(
   const timer = setInterval(() => {
     if (finished) return;
     try {
-      const entry = lstatSync(file, { throwIfNoEntry: false });
-      if (entry === undefined) return;
-      if (!entry.isFile() || entry.size > MAX_STATUS_FILE_BYTES) {
-        finish();
+      // Never follow a link or wait on a pipe: the agent can swap the file at any moment.
+      let fd: number;
+      try {
+        fd = openSync(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ELOOP' || code === 'EISDIR') finish();
         return;
       }
-      if (entry.size <= offset) return;
-      const fd = openSync(file, 'r');
       let text: string;
       try {
-        const size = fstatSync(fd).size;
-        if (size > MAX_STATUS_FILE_BYTES) {
+        const entry = fstatSync(fd);
+        if (!entry.isFile() || entry.size > MAX_STATUS_FILE_BYTES) {
           finish();
           return;
         }
+        const size = entry.size;
+        if (size <= offset) return;
         const buffer = Buffer.alloc(Math.max(0, size - offset));
         const read = readSync(fd, buffer, 0, buffer.length, offset);
         text = buffer.subarray(0, read).toString('utf8');
