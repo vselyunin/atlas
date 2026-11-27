@@ -1,8 +1,33 @@
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import type * as FsPromises from 'node:fs/promises';
 import { mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { trustWorktree } from '../src/sessions/trust.js';
+
+// Lets one test make the first sync of an opened file fail.
+const failure = vi.hoisted(() => ({ syncOnce: false }));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof FsPromises>();
+  return {
+    ...actual,
+    open: async (...args: Parameters<typeof actual.open>) => {
+      const handle = await actual.open(...args);
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property === 'sync' && failure.syncOnce) {
+            return () => {
+              failure.syncOnce = false;
+              return Promise.reject(new Error('disk full'));
+            };
+          }
+          const value = Reflect.get(target, property, target) as unknown;
+          return typeof value === 'function' ? (value.bind(target) as unknown) : value;
+        },
+      });
+    },
+  };
+});
 
 let dir: string;
 let config: string;
@@ -64,6 +89,17 @@ it('returns false and leaves the file alone for an unusable config', async () =>
   const big = JSON.stringify({ pad: 'x'.repeat(5 * 1024 * 1024 + 10) });
   await writeFile(config, big);
   await expectUntouched(config, big);
+});
+
+it('restores the original bytes when the write fails after the file changed', async () => {
+  const text = JSON.stringify({ theme: 'dark', projects: { '/other': { a: 1 } } });
+  await writeFile(config, text);
+  const before = (await stat(config)).ino;
+  failure.syncOnce = true;
+  expect(await trustWorktree(config, '/work')).toBe(false);
+  expect(failure.syncOnce).toBe(false);
+  expect(await readFile(config, 'utf8')).toBe(text);
+  expect((await stat(config)).ino).toBe(before);
 });
 
 it('returns false for a symlinked config and leaves the target alone', async () => {

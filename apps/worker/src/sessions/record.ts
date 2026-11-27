@@ -89,6 +89,8 @@ export async function conversationExists(home: string, agentSessionId: string): 
 }
 
 export function chooseRun(record: RunRecord | null, hasConversation: boolean): RunMode {
+  // Without a record there is no ID to resume.
+  if (record === null) return 'first';
   if (hasConversation) return 'resume';
-  return record?.delivered ? 'fresh' : 'first';
+  return record.delivered ? 'fresh' : 'first';
 }

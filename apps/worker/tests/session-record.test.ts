@@ -60,7 +60,7 @@ it('chooses the run from the record and the conversation', () => {
   expect(chooseRun({ agentSessionId: id, delivered: true }, true)).toBe('resume');
   expect(chooseRun({ agentSessionId: id, delivered: true }, false)).toBe('fresh');
   expect(chooseRun({ agentSessionId: id, delivered: false }, true)).toBe('resume');
-  expect(chooseRun(null, true)).toBe('resume');
+  expect(chooseRun(null, true)).toBe('first');
 });
 
 it('finds a conversation file only when it is a regular file', async () => {
