@@ -109,11 +109,16 @@ The API has no terminal size at that moment, so it starts with a default size
 (builder's choice, for example 120 by 30); the Board sends its real size when
 it connects, as it does today.
 
-If the start is refused (the Worker is offline, the project has no checkout,
-the Worker is too old), the move still succeeds. The API records for the task
-that the session did not start and why. The card shows the red dot, and the
-task shows the reason and a "Start session" button to try again. This record
-is replaced by the next start.
+If the start is refused (the Worker is offline or too old), the move still
+succeeds. The API records for the task that the session did not start and why.
+The card shows the red dot, and the task shows the reason and a "Start
+session" button to try again. The record is replaced by the next start and
+removed when the task leaves Working, so a red dot never follows a card into a
+column where it cannot be cleared.
+
+A project with no checkout on a Worker cannot run sessions at all. Moving its
+tasks into Working starts nothing and shows no dot; the task panel says that
+this project has no checkout, with no start button.
 
 A start for a task that has a `starting` or `running` session does nothing, as
 today. The move and a click arriving together must still give one session; a
@@ -124,19 +129,24 @@ test covers this in the API and one in the Worker.
 The task panel replaces "Open terminal" and the start button inside the
 terminal with one control that depends on the session:
 
-| Session                      | Button                           | Shown for          |
-| ---------------------------- | -------------------------------- | ------------------ |
-| starting or running          | "Connect" (then "Hide terminal") | any column         |
-| none, or did not start       | "Start session"                  | Working tasks only |
-| ended                        | "Resume session"                 | Working tasks only |
-| none or ended, other columns | no button                        |                    |
+| Session                | Button                           | Shown for          |
+| ---------------------- | -------------------------------- | ------------------ |
+| starting or running    | "Connect" (then "Hide terminal") | any column         |
+| none, or did not start | "Start session"                  | Working tasks only |
+| ended                  | "Resume session"                 | Working tasks only |
+| ended, any column      | "Show last output"               | next to the above  |
+| none, other columns    | no button                        |                    |
 
 "Connect" opens the terminal on the existing session and never starts
 anything. "Start session" and "Resume session" send the same `start` message;
 the Worker decides what it means (next section). "Stop" stays in the open
 terminal. A task that is not in Working shows its status sentence but offers
-no start; an ended session's last output can still be opened read-only with
-"Show last output" (author's call).
+no start. "Show last output" opens the ended session's terminal read-only
+(author's call).
+
+The description of a Working task can still be edited, as today, but the agent
+received the prompt at its first run and does not see later edits. The task
+panel says so next to the description while a session exists.
 
 ### Prompt once, then resume
 
@@ -144,26 +154,32 @@ The Worker decides between a first run and a resume, because only it knows
 what ran. It keeps a small record per task in its state directory, which the
 agent cannot read. For Claude:
 
-- No saved conversation for the task: the Worker starts Claude with the prompt
-  and a session ID it chose (`--session-id <uuid>`), and writes the record with
-  that ID.
-- Claude has a saved conversation with the recorded ID: the Worker starts
+- Prompt not delivered yet: the Worker starts Claude with the prompt and a
+  session ID it chose (`--session-id <uuid>`), and records that ID.
+- Prompt delivered and Claude still has the conversation: the Worker starts
   `claude --resume <uuid>` with no prompt.
+- Prompt delivered but the conversation is gone (Claude removes old
+  conversations after a while, and the agent home can be replaced): the Worker
+  starts Claude with no prompt and a new session ID, and says so. The task is
+  not run again; the user tells the agent what to do.
 
-The prompt counts as delivered only once Claude has saved a conversation. A
-first run that dies before that (an expired login, a crash, an immediate Stop)
-is followed by another first run with the prompt, so a task is neither
-repeated nor left without its prompt. (An earlier proposal to the user opened
-Claude with no prompt in that case; the review showed the task would then
-never get its prompt.)
+The prompt counts as delivered once the Worker has seen a saved conversation
+for the recorded ID; it checks when a session ends and before the next start,
+and records `delivered` for good. A first run that dies before Claude saved
+anything (an expired login, a crash, an immediate Stop) is followed by another
+first run with the prompt. So a task is neither repeated nor left without its
+prompt.
 
 The Worker writes one line to the terminal before the agent's output saying
-which of the two happened, next to the sandbox line it already writes.
+which of the three happened, next to the sandbox line it already writes. On a
+run without a prompt it also reports the activity `idle`, because no hook
+fires until the user types and the dot must not show working meanwhile.
 
 A start fails closed like today when the sandbox cannot start.
 
-For Codex and custom commands, a later run starts the agent with no prompt and
-no history. That is documented as unverified, like the rest of Codex support.
+For Codex and custom commands the prompt counts as delivered once the agent
+process has started; a later run starts the agent with no prompt and no
+history. That is documented as unverified, like the rest of Codex support.
 
 The record survives a Worker restart, so a task is not repeated after one.
 
@@ -181,9 +197,15 @@ Before it starts Claude in a task worktree, the Worker sets
 
 - Only for the Claude profile, and only for the path `ensureWorktree` returned,
   which is always a checked worktree under `.atlas-worktrees`.
-- The file is changed in place and every other key is kept. If the file is
-  missing or cannot be parsed, the Worker changes nothing and starts the agent
-  anyway; the user then sees the question as today.
+- Only when the session runs in the sandbox. With `ATLAS_AGENT_SANDBOX=off`
+  the Worker writes nothing and Claude asks as today, because a repository's
+  hooks would otherwise run unasked with the Worker's full rights.
+- The file is changed in place and every other key is kept. Agents can write
+  this file, so the Worker treats it as untrusted input: a regular file under a
+  size limit that parses as a JSON object, or it is left alone. After writing,
+  the Worker reads it back and checks it. If the file is missing, unusable or
+  the check fails, the Worker starts the agent anyway and the user sees the
+  question as today.
 - The Worker starts sessions one at a time, so two of its own writes cannot
   collide.
 - Nothing of the file's content is logged.
@@ -206,10 +228,12 @@ session's state into one status, and the Board shows it.
 **From Claude to the Worker.** The Worker passes Claude a settings value on
 the command line (`--settings`) that adds hooks. Nothing is written into the
 repository or Claude's settings files. Each hook runs a fixed command that
-appends one short line to a status file for that session, in a folder the
-sandbox lets the agent write and the Worker can read, outside the worktree and
-on the container's own filesystem (file watching does not work on a Windows
-drive). The Worker watches the file and deletes it when the session ends.
+appends one short line to a status file for that session. The file is in a
+folder made for that one session and added only to that session's writable
+paths, outside the worktree, outside the Worker state directory, and on the
+container's own filesystem (file watching does not work on a Windows drive).
+The hook command itself is readable but not writable in the sandbox. The
+Worker watches the file and removes the folder when the session ends.
 
 | Claude event                                  | Activity                                                |
 | --------------------------------------------- | ------------------------------------------------------- |
@@ -226,27 +250,44 @@ activity is `needs_input` with the detail `asked in text`, otherwise `idle`
 stays in the hook.
 
 The agent can write to its own status file, so a misbehaving agent can show a
-wrong dot on its own card. It cannot affect another task. This is accepted.
+wrong dot on its own card. This is accepted. It cannot reach another
+session's folder. The Worker treats the file as hostile: it reads a regular
+file only, up to a size limit, and accepts only the known activity values and
+detail codes; anything else is ignored.
 
 To be checked with the real Claude first, see "Checks before building": that
 hooks given this way run in a task worktree under the sandbox, that the events
-in the table exist in the installed version, and whether the first prompt
-fires the "prompt submitted" event. A session with no reports counts as
+in the table exist in the installed version, which event marks a question as
+answered, that the turn-finished hook receives the agent's last message, and
+whether the first prompt fires the "prompt submitted" event. A session with no reports counts as
 working, so the start is covered either way.
 
 **From the Worker to the API.** A new Worker message `session.activity` with
 `{sessionId, runId, activity, detail}`; `activity` is `working`,
-`needs_input`, `idle` or `error`, `detail` is a short code or null. The API
-ignores it for a run that is not current, as with the other session messages.
+`needs_input`, `idle` or `error`, and `detail` is null or one of a fixed list
+of codes in the contract (`asked_in_text`, `resumed`, and the API error
+kinds), never free text. The API ignores it for a run that is not current, as with the other session messages.
 The Worker also tells the API in `session.exit` whether the user's Stop ended
 the session, so a stopped session is not shown as a failure.
 
-After it registers, the Worker sends the list of sessions it is running
-(`session.sync`, `{sessions: [{sessionId, runId}]}`). The API ends every
-session it holds for that Worker that is not in the list, with the reason
-"The Worker restarted and the session was lost". While a Worker is offline,
-its live sessions show the red dot with "Worker offline"; they return to
-their last status when it reconnects with them.
+After it registers, the Worker sends `session.sync`: every session it is
+running or still starting, each with its run ID, worktree path, branch and
+current activity, and the exits it could not report while disconnected. The
+API then:
+
+- applies the reported exits and activities, so a session that ended cleanly
+  while the Worker was disconnected is shown as ended, not as lost;
+- ends every other session it holds for that Worker that was started before
+  this registration and is not in the list, with the reason "The Worker
+  restarted and the session was lost". A session started after the
+  registration is left alone, and a late `session.started` never revives an
+  ended session;
+- adopts listed sessions it does not know, for tasks that exist. This is how
+  cards get their dots back after an API restart; the earlier output is not
+  replayed.
+
+While a Worker is offline, its live sessions show the red dot with "Worker
+offline".
 
 **Status the API serves.** One value per task, with a sentence:
 
@@ -258,6 +299,10 @@ their last status when it reconnects with them.
 | `finished`    | green         | Running, the turn finished and the agent waits                                                               |
 | `problem`     | red           | Start refused or failed; agent exited with a non-zero code; API error in a turn; Worker offline or restarted |
 | `ended`       | grey          | Agent exited with code 0, or the user stopped it                                                             |
+
+A session that ends with no exit code and a message (a failed start, a lost
+session) is a `problem`. One that exits with code 0 and a message about
+copying its commits is `ended`, and the sentence carries the message.
 
 The sentence names the case, for example "Working since 14:02", "Waiting for
 your answer", "The agent asked something in its last message", "Finished at
@@ -331,9 +376,11 @@ the builder lists the files and exact changes and asks before touching them.
 
 New tests cover at least: the move starting one session; the move with the
 Worker offline; move plus click giving one session; first run, resume and
-resume-without-conversation argument lists; the trust write keeping other keys
-and skipping an unreadable file; the mapping from session state and activity
-to status; `session.sync` ending lost sessions; the status route; the card dot
+lost-conversation argument lists; the trust write keeping other keys, skipping
+an unusable file and doing nothing with the sandbox off; a hostile status
+file; the mapping from session state and activity
+to status; `session.sync` ending lost sessions, applying missed exits, keeping a session
+started after registration and adopting unknown ones; the status route; the card dot
 and the three buttons on the Board in both themes.
 
 ## Verification
@@ -347,11 +394,10 @@ independent review is run.
 
 ## Known limits
 
-- After an API restart the cards show no dot until a session is started or
-  connected again, because the API forgets sessions. A task in Working then
-  offers "Start session", which attaches to the session if the Worker still
-  runs it and resumes it otherwise. Output replay from before the restart is
-  lost, as today.
+- After an API restart the cards show no dot until the Worker has
+  reconnected and sent its list. Sessions that ended before the restart are
+  forgotten; such a task in Working offers "Start session", which resumes it.
+  Output replay from before the restart is lost, as today.
 - The card's dot can be a few seconds behind; the task panel is live.
 - "Asked in text" is a guess from the last character of the agent's message.
 - Status detail exists for Claude only.
