@@ -55,7 +55,8 @@ export function connect(config: WorkerConfig, journal: Journal): { stop(): Promi
   // disconnected is dropped.
   const missedExits: SessionExit['payload'][] = [];
   const sessions = new SessionManager(config, (event) => {
-    if (event.type === 'session.exit' && !registered) {
+    // Also while the socket is closing but its close event has not arrived yet.
+    if (event.type === 'session.exit' && (!registered || socket?.readyState !== WebSocket.OPEN)) {
       missedExits.push(event.payload);
       if (missedExits.length > MAX_MISSED_EXITS) missedExits.shift();
       return;

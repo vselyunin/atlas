@@ -17,7 +17,14 @@ import type {
 import { resolveTarget } from '../repositories/paths.js';
 import { agentProfile, sessionArgs } from './agents.js';
 import { startObjectSync } from './objects.js';
-import { RUN_NOTICES, chooseRun, conversationExists, readRecord, writeRecord } from './record.js';
+import {
+  RERUN_NOTICE,
+  RUN_NOTICES,
+  chooseRun,
+  conversationExists,
+  readRecord,
+  writeRecord,
+} from './record.js';
 import type { RunMode, RunRecord } from './record.js';
 import {
   SANDBOX_OFF_NOTICE,
@@ -59,6 +66,8 @@ interface Session {
 interface PendingStart {
   runId: string;
   cancelled: boolean;
+  // Set by stop(), so the exit says the user ended the session.
+  stopRequested: boolean;
 }
 
 // The folder a Claude run writes its status lines to, and the hook script that writes them.
@@ -121,7 +130,7 @@ export class SessionManager {
     const finishing = this.finishing.get(sessionId);
     if (finishing) return finishing.then(() => this.start(payload));
     if (this.stopped || this.pending.has(sessionId)) return Promise.resolve();
-    const pending: PendingStart = { runId, cancelled: false };
+    const pending: PendingStart = { runId, cancelled: false, stopRequested: false };
     this.pending.set(sessionId, pending);
     // One start at a time, so two tasks cannot race while preparing the same repository.
     this.queue = this.queue.then(() => this.launch(payload, pending));
@@ -161,18 +170,28 @@ export class SessionManager {
     const { sessionId, runId } = payload;
     const exit = (message: string) =>
       this.emit({ type: 'session.exit', payload: { sessionId, runId, exitCode: null, message } });
-    const stoppedEarly = 'The session was stopped before it started';
+    const stoppedEarly = () =>
+      this.emit({
+        type: 'session.exit',
+        payload: {
+          sessionId,
+          runId,
+          exitCode: null,
+          message: 'The session was stopped before it started',
+          ...(pending.stopRequested ? { stopped: true } : {}),
+        },
+      });
     let status: StatusFolder | null = null;
     let spawned = false;
     try {
       const abandoned = () => this.stopped || pending.cancelled;
-      if (abandoned()) return exit(stoppedEarly);
+      if (abandoned()) return stoppedEarly();
       const repository = await resolveTarget(this.root, payload.relativePath);
       const worktree = await ensureWorktree(this.root, repository, payload);
       const { path, branch } = worktree;
-      if (abandoned()) return exit(stoppedEarly);
+      if (abandoned()) return stoppedEarly();
       const env = agentEnvironment(this.root, this.agent, await this.excludesFile(), worktree);
-      if (abandoned()) return exit(stoppedEarly);
+      if (abandoned()) return stoppedEarly();
       const sandboxed = this.agent.sandbox === 'required';
       const [agentFile = 'claude'] = this.agent.command;
       const profile = agentProfile(this.agent.command);
@@ -184,7 +203,7 @@ export class SessionManager {
         // Claude would ask whether to trust the new folder; inside the sandbox the Worker answers.
         if (sandboxed) await trustWorktree(join(this.home, '.claude.json'), path);
       }
-      if (abandoned()) return exit(stoppedEarly);
+      if (abandoned()) return stoppedEarly();
       const args = sessionArgs({
         profile,
         command: this.agent.command,
@@ -211,7 +230,7 @@ export class SessionManager {
           env,
           writableDirectories: profile.writableDirectories(this.home),
         });
-        if (abandoned()) return exit(stoppedEarly);
+        if (abandoned()) return stoppedEarly();
         // The agent and its arguments stay separate arguments, so no shell reads the prompt.
         // `--` stops srt reading the agent's options as its own.
         file = 'srt';
@@ -246,9 +265,22 @@ export class SessionManager {
         type: 'session.output',
         payload: { sessionId, runId, data: sandboxed ? SANDBOX_ON_NOTICE : SANDBOX_OFF_NOTICE },
       });
-      this.emit({ type: 'session.output', payload: { sessionId, runId, data: RUN_NOTICES[mode] } });
-      if (mode !== 'first')
+      // Only Claude has a conversation to resume; other agents just say whether the prompt was
+      // sent, and an agent that never takes the prompt says nothing.
+      const notice = isClaude
+        ? RUN_NOTICES[mode]
+        : profile.takesPrompt
+          ? mode === 'first'
+            ? RUN_NOTICES.first
+            : RERUN_NOTICE
+          : null;
+      if (notice !== null) {
+        this.emit({ type: 'session.output', payload: { sessionId, runId, data: notice } });
+      }
+      // Without hooks an activity would never update, so only Claude reports one.
+      if (isClaude && mode !== 'first') {
         this.report(sessionId, session, { activity: 'idle', detail: 'resumed' });
+      }
       const runStatus = status;
       const watcher =
         runStatus === null
@@ -414,7 +446,10 @@ export class SessionManager {
     if (session) {
       session.stopRequested = true;
       this.kill(session);
-    } else if (pending) pending.cancelled = true;
+    } else if (pending) {
+      pending.stopRequested = true;
+      pending.cancelled = true;
+    }
     // A session that is finishing reports its own exit shortly.
     else if (!this.finishing.has(sessionId)) this.reportMissing(sessionId, runId);
   }

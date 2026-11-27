@@ -16,6 +16,10 @@ export const RUN_NOTICES: Record<RunMode, string> = {
   fresh: 'Atlas: the earlier conversation is gone; started without the task prompt.\r\n',
 };
 
+// A later run of an agent other than Claude, which has no conversation to resume.
+export const RERUN_NOTICE =
+  'Atlas: this agent was started for the task before; the task prompt was not sent again.\r\n';
+
 const MAX_RECORD_BYTES = 64 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -14,7 +14,7 @@ import { prepareConfig } from '../src/config.js';
 import { startWorker } from '../src/main.js';
 import { SessionManager } from '../src/sessions/manager.js';
 import type { SessionEvent } from '../src/sessions/manager.js';
-import { RUN_NOTICES, readRecord, writeRecord } from '../src/sessions/record.js';
+import { RERUN_NOTICE, RUN_NOTICES, readRecord, writeRecord } from '../src/sessions/record.js';
 import { sessionKey } from '../src/sessions/worktree.js';
 import { writeFakeSrt } from './support/sandbox.js';
 import { startPayload } from './support/sessions.js';
@@ -53,10 +53,11 @@ interface Setup {
   manager: SessionManager;
 }
 
-// A stand-in agent named `claude` or `codex`, so the Worker uses that agent's profile. It prints
+// A stand-in agent named `claude`, `codex` or anything else (a custom command), so the Worker uses
+// that profile. It prints
 // its arguments as `ARGS [...]`.
 async function setup(
-  name: 'claude' | 'codex',
+  name: 'claude' | 'codex' | 'custom',
   sandbox: 'required' | 'off' = 'off',
 ): Promise<Setup> {
   directory = await realpath(await mkdtemp(join(tmpdir(), 'atlas-runs-')));
@@ -326,8 +327,28 @@ describe('Codex runs', () => {
     await addConversation(s.home, record?.agentSessionId ?? '');
     const second = startPayload(sessionId, 'app', { prompt: 'do the task' });
     expect(await runOnce(s, second)).toEqual([]);
-    expect(output(second.runId)).toContain(RUN_NOTICES.fresh);
-    expect(activities(second.runId)).toEqual([{ activity: 'idle', detail: 'resumed' }]);
+    expect(output(second.runId)).toContain(RERUN_NOTICE);
+    expect(output(second.runId)).not.toContain(RUN_NOTICES.fresh);
+    // Without hooks an activity would never update, so none is reported.
+    expect(events.some((event) => event.type === 'session.activity')).toBe(false);
+  });
+});
+
+describe('custom agent runs', () => {
+  it('says nothing about the prompt and reports no activity', async () => {
+    const s = await setup('custom');
+    const sessionId = randomUUID();
+    const first = startPayload(sessionId, 'app', { prompt: 'do the task' });
+    const second = startPayload(sessionId, 'app', { prompt: 'do the task' });
+
+    expect(await runOnce(s, first)).toEqual([]);
+    expect(await runOnce(s, second)).toEqual([]);
+
+    for (const notice of [...Object.values(RUN_NOTICES), RERUN_NOTICE]) {
+      expect(output(first.runId)).not.toContain(notice);
+      expect(output(second.runId)).not.toContain(notice);
+    }
+    expect(events.some((event) => event.type === 'session.activity')).toBe(false);
   });
 });
 
@@ -341,6 +362,34 @@ describe('session lifecycle', () => {
     s.manager.stop(payload.sessionId, payload.runId);
 
     expect((await exitOf(payload.runId))?.payload).toMatchObject({ stopped: true });
+  });
+
+  it('says the user stopped a session that was still starting', async () => {
+    const s = await setup('codex');
+    const payload = startPayload(randomUUID(), 'app');
+
+    const starting = s.manager.start(payload);
+    s.manager.stop(payload.sessionId, payload.runId);
+    await starting;
+
+    expect((await exitOf(payload.runId))?.payload).toEqual({
+      sessionId: payload.sessionId,
+      runId: payload.runId,
+      exitCode: null,
+      message: 'The session was stopped before it started',
+      stopped: true,
+    });
+  });
+
+  it('omits stopped when the Worker stops a session that was still starting', async () => {
+    const s = await setup('codex');
+    const payload = startPayload(randomUUID(), 'app');
+
+    const starting = s.manager.start(payload);
+    s.manager.stopAll();
+    await starting;
+
+    expect((await exitOf(payload.runId))?.payload).not.toHaveProperty('stopped');
   });
 
   it('omits stopped when the agent exits by itself', async () => {
