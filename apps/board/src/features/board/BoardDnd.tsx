@@ -16,7 +16,7 @@ import { Plus, UserRound, Bot } from 'lucide-react';
 import { TaskStatusSchema, TASK_STATUS_LABELS } from '@atlas/contracts';
 import type { SessionSummary, Task, TaskStatus, Worker } from '@atlas/contracts';
 import { label } from '../tasks/TaskFields';
-import { StatusDot } from '../sessions/status';
+import { StatusDot, statusDescription } from '../sessions/status';
 import { isSamePosition, orderedTasks, targetAtPointer } from './dropTarget';
 import type { DropTarget } from './dropTarget';
 
@@ -86,6 +86,9 @@ function TaskCard({
     id: task.id,
     disabled,
   });
+  const session = sessions?.get(task.id);
+  const description = session ? statusDescription(session) : null;
+  const statusId = `${useId()}-status`;
   return (
     <article
       ref={setNodeRef}
@@ -100,7 +103,7 @@ function TaskCard({
         aria-label={task.title}
         aria-disabled={undefined}
         aria-pressed={isDragging || keyboardActive}
-        aria-describedby={instructions}
+        aria-describedby={description ? `${statusId} ${instructions}` : instructions}
         onMouseDown={(event) => {
           suppressClick.current = false;
           listeners?.onMouseDown?.(event);
@@ -118,8 +121,13 @@ function TaskCard({
           onOpen(task);
         }}
       >
-        <TaskContents task={task} workers={workers} session={sessions?.get(task.id)} />
+        <TaskContents task={task} workers={workers} session={session} />
       </button>
+      {description && (
+        <span id={statusId} className="sr-only">
+          {description}
+        </span>
+      )}
     </article>
   );
 }

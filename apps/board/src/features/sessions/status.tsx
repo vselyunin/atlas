@@ -60,15 +60,20 @@ export function statusSentence(summary: StatusFields): string {
   }
 }
 
+// "<label>. <sentence>" for screen readers; null when there is no dot.
+export function statusDescription(summary: StatusFields): string | null {
+  if (summary.status === 'none') return null;
+  return `${LABELS[summary.status]}. ${statusSentence(summary)}`;
+}
+
 export function StatusDot({ summary }: { summary: SessionSummary }) {
   if (summary.status === 'none') return null;
-  const sentence = statusSentence(summary);
   return (
     <span
       className={`status-dot ${summary.status}`}
       role="img"
       aria-label={LABELS[summary.status]}
-      title={sentence}
+      title={statusSentence(summary)}
     />
   );
 }

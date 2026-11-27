@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
 import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { makeTaskFixture } from '@atlas/contracts';
@@ -68,7 +69,7 @@ it('renders no dot for a task without a session', () => {
   expect(container.firstChild).toBeNull();
 });
 
-const board = (sessions?: ReadonlyMap<string, SessionSummary>) => {
+const board = (session?: SessionSummary) => {
   const task = makeTaskFixture({ title: 'Dotted task' });
   render(
     <BoardDnd
@@ -78,31 +79,31 @@ const board = (sessions?: ReadonlyMap<string, SessionSummary>) => {
       onCreate={vi.fn()}
       onMove={vi.fn()}
       disabled={false}
-      sessions={sessions}
+      sessions={new Map(session ? [[task.id, session]] : [])}
     />,
   );
-  return task;
 };
 
 it('shows a labelled dot on a card whose session needs input', () => {
-  const task = makeTaskFixture({ title: 'Dotted task' });
-  render(
-    <BoardDnd
-      tasks={[task]}
-      workers={[]}
-      onOpen={vi.fn()}
-      onCreate={vi.fn()}
-      onMove={vi.fn()}
-      disabled={false}
-      sessions={new Map([[task.id, summary('needs_input', 'dialog')]])}
-    />,
-  );
+  board(summary('needs_input', 'dialog'));
   const dot = screen.getByRole('img', { name: 'Agent needs you' });
   expect(dot.className).toBe('status-dot needs_input');
   expect(dot.getAttribute('title')).toBe('Waiting for your answer');
 });
 
 it('shows no dot on a card without a session entry', () => {
-  board(new Map());
+  board();
   expect(screen.queryByRole('img')).toBeNull();
+});
+
+it('describes the status on the card button without changing its name', () => {
+  board(summary('needs_input', 'dialog'));
+  const card = screen.getByRole('button', { name: 'Dotted task' });
+  expect(card).toHaveAccessibleDescription(/Agent needs you\. Waiting for your answer/);
+});
+
+it('adds no status description to a card without a session', () => {
+  board();
+  const card = screen.getByRole('button', { name: 'Dotted task' });
+  expect(card).not.toHaveAccessibleDescription(/Agent/);
 });
