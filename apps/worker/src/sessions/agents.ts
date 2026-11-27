@@ -1,4 +1,5 @@
 import { basename, join } from 'node:path';
+import type { RunMode } from './record.js';
 
 export type AgentKind = 'claude' | 'codex' | 'custom';
 
@@ -87,6 +88,34 @@ export function agentArgs(
   if (prompt && profile.takesPrompt) {
     // A leading dash would be read as a command-line option of the agent.
     args.push(prompt.startsWith('-') ? ` ${prompt}` : prompt);
+  }
+  return args;
+}
+
+// How one run of the agent starts: the task prompt only on the first run, the earlier
+// conversation on a resume. Only Claude has session IDs and hook settings.
+export function sessionArgs(input: {
+  profile: AgentProfile;
+  command: string[];
+  prompt: string;
+  sandboxed: boolean;
+  mode: RunMode;
+  agentSessionId: string;
+  hookSettings: string | null;
+}): string[] {
+  const { profile, command, prompt, sandboxed, mode, agentSessionId, hookSettings } = input;
+  if (profile.kind !== 'claude') {
+    return agentArgs(profile, command, mode === 'first' ? prompt : '', sandboxed);
+  }
+  const args = agentArgs(profile, command, '', sandboxed);
+  if (hookSettings !== null) args.push('--settings', hookSettings);
+  if (mode === 'resume') {
+    args.push('--resume', agentSessionId);
+  } else {
+    args.push('--session-id', agentSessionId);
+    if (mode === 'first' && prompt) {
+      args.push(prompt.startsWith('-') ? ` ${prompt}` : prompt);
+    }
   }
   return args;
 }
