@@ -609,8 +609,11 @@ activity, so the dot stays "working" while their process runs.
 Worker sets `projects["<worktree path>"].hasTrustDialogAccepted` to `true` in `~/.claude.json` in
 the agent's home, so Claude does not ask whether to trust the folder. This applies only to the
 worktree path the Worker created under `.atlas-worktrees`, and only when the session runs in the
-sandbox: with `ATLAS_AGENT_SANDBOX=off` the Worker writes nothing and Claude asks as before. The
-sandbox makes that one file writable, not the home folder, so the Worker changes the file in place
+sandbox: with `ATLAS_AGENT_SANDBOX=off` the Worker writes nothing, so Claude asks for a worktree it
+has not trusted yet. Trust already written stays in the file: a worktree trusted in an earlier
+sandboxed session is still trusted when the same agent home later runs with the sandbox off, and
+its repository's Claude settings, hooks and MCP servers then load without asking and without the
+sandbox's limits. The sandbox makes that one file writable, not the home folder, so the Worker changes the file in place
 and keeps every other key. The agent can write the file too, so the Worker treats it as untrusted:
 it must be a regular file of at most 5 MiB that parses as a JSON object, or it is left alone. After writing, the Worker reads the file back and, if the check fails, tries to restore the
 original content. A crash in the middle of a write cannot be undone, because a rename is not
@@ -645,9 +648,11 @@ red dot for a model API error as unverified. The other events were observed with
 on 2026-11-27.
 
 The agent can write its own status file, so a misbehaving agent can show a wrong dot on its own
-card; it cannot reach another session's folder. The Worker reads only a regular file of at most
-64 KiB, follows no link, takes whole lines only and ignores any value it does not know. A file that
-stops being a regular file or grows past the limit is not read again.
+card; it cannot reach another session's folder. The Worker reads only a regular file and at most
+64 KiB of new lines per poll, follows no link, takes whole lines only and ignores any value it does
+not know. A long session's file can grow past 64 KiB and is still read. More than 64 KiB of new
+data at once is skipped unread, together with the rest of a line it cuts, and the lines after it
+count again. A file that stops being a regular file is not read again.
 
 Limits you will see:
 
