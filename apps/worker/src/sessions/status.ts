@@ -13,6 +13,7 @@ export const MAX_STATUS_FILE_BYTES = 65_536;
 const MAX_LINE_LENGTH = 64;
 const DEFAULT_INTERVAL_MS = 500;
 const NO_DETAIL = '-';
+const NEWLINE = 0x0a;
 
 // The hook script runs by plain `node` in the agent's sandbox, so it is standalone CommonJS with
 // no imports beyond `node:fs`. It carries its own copy of the failure kinds, generated from the
@@ -118,13 +119,17 @@ export function parseStatus(text: string): AgentActivity[] {
 }
 
 // Polls the status file and reports the last valid line of each read. A missing file is waited
-// for; a file that is not a regular file, or grows past the limit, is never read again.
+// for; a file that is not a regular file is never read again. At most MAX_STATUS_FILE_BYTES of
+// unread lines are read per tick, so a long session keeps reporting while an oversized burst is
+// skipped unread and the lines after it still count.
 export function watchStatus(
   file: string,
   onActivity: (activity: AgentActivity) => void,
   intervalMs: number = DEFAULT_INTERVAL_MS,
 ): { stop(): void } {
   let offset = 0;
+  // After a skip, the bytes up to the next newline may be the tail of a skipped line.
+  let midLine = false;
   let finished = false;
   const timer = setInterval(() => {
     if (finished) return;
@@ -138,26 +143,37 @@ export function watchStatus(
         if (code === 'ELOOP' || code === 'EISDIR') finish();
         return;
       }
-      let text: string;
+      let chunk: Buffer;
       try {
         const entry = fstatSync(fd);
-        if (!entry.isFile() || entry.size > MAX_STATUS_FILE_BYTES) {
+        if (!entry.isFile()) {
           finish();
           return;
         }
         const size = entry.size;
         if (size <= offset) return;
-        const buffer = Buffer.alloc(Math.max(0, size - offset));
-        const read = readSync(fd, buffer, 0, buffer.length, offset);
-        text = buffer.subarray(0, read).toString('utf8');
+        if (size - offset > MAX_STATUS_FILE_BYTES) {
+          // Too much at once for the hook's short lines: skip it without reading it.
+          const last = Buffer.alloc(1);
+          midLine = readSync(fd, last, 0, 1, size - 1) !== 1 || last[0] !== NEWLINE;
+          offset = size;
+          return;
+        }
+        const buffer = Buffer.alloc(size - offset);
+        chunk = buffer.subarray(0, readSync(fd, buffer, 0, buffer.length, offset));
       } finally {
         closeSync(fd);
       }
       // Only whole lines count; the rest is read again once the hook has finished it.
-      const end = text.lastIndexOf('\n') + 1;
+      const end = chunk.lastIndexOf(NEWLINE) + 1;
       if (end === 0) return;
-      offset += Buffer.byteLength(text.slice(0, end), 'utf8');
-      const last = parseStatus(text.slice(0, end)).at(-1);
+      offset += end;
+      let start = 0;
+      if (midLine) {
+        start = chunk.indexOf(NEWLINE) + 1;
+        midLine = false;
+      }
+      const last = parseStatus(chunk.subarray(start, end).toString('utf8')).at(-1);
       if (last !== undefined) onActivity(last);
     } catch {
       // The next tick tries again; a timer must never throw.
