@@ -51,7 +51,7 @@ Found after a closer read of the tests (also asked):
 - `apps/worker/tests/sessions.test.ts` lines 144, 197, 311, 328 and 371 compare the whole event list; they gain the run notice output and, where a run has no prompt, the activity event. The exact lines are settled in Task 4 and shown to the user before the edit.
 - `apps/api/tests/route-protection.test.ts` reads the route list from the app and needs no change.
 
-Status: **not yet answered.**
+Status: **approved by the user, 2026-11-27**, for the files and changes listed here. For `apps/worker/tests/sessions.test.ts` the exact lines are shown to the user before the edit. Any other existing test: stop and ask.
 
 ## Review focus
 
