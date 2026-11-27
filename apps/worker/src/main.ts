@@ -4,6 +4,7 @@ import type { WorkerConfigInput } from './config.js';
 import { acquireLock } from './state/lock.js';
 import { Journal } from './state/journal.js';
 import { connect } from './connection.js';
+import { workspaceProblem } from './repositories/permissions.js';
 
 export function startWorker(input: WorkerConfigInput): { stop(): Promise<void> } {
   const config = prepareConfig(input);
@@ -28,7 +29,13 @@ export function startWorker(input: WorkerConfigInput): { stop(): Promise<void> }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    const worker = startWorker(loadConfig(process.env));
+    const config = loadConfig(process.env);
+    const worker = startWorker(config);
+    // Sessions on existing repositories still work in such a workspace, so the Worker keeps
+    // running and says at once why new repositories and clones will be refused.
+    void workspaceProblem(config.root).then((problem) => {
+      if (problem) console.error(`Warning: ${problem} New repositories and clones are refused.`);
+    });
     let stopping = false;
     const stop = () => {
       if (stopping) return;

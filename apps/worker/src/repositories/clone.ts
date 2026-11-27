@@ -9,7 +9,7 @@ import { childEnvironment } from '../git-environment.js';
 import type { JournalEntry } from '../state/journal.js';
 import { CredentialRefused, CredentialUnavailable } from './credential.js';
 import type { CredentialRequester, GrantedCredential } from './credential.js';
-import { recoverCommand } from './initialize.js';
+import { recoverCommand, refuseUnusableTarget } from './initialize.js';
 import type { ExecutionContext } from './initialize.js';
 import { resolveTarget } from './paths.js';
 
@@ -336,6 +336,8 @@ export async function cloneRepository(
     const info = await lstat(target);
     entry = { ...entry, stage: 'created', identity: { dev: info.dev, ino: info.ino } };
     context.journal.write(entry);
+    const refusal = await refuseUnusableTarget(target, context);
+    if (refusal) return finish(refusal);
     await runGit(git, withConfig(localConfig, ['init', '--quiet', '--', target]), {
       env,
       signal: context.signal,

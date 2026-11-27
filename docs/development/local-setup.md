@@ -413,6 +413,72 @@ root without systemd and the service is down, it starts `dockerd` itself and wri
 log to `/var/log/dockerd.log`. Otherwise it prints that the service is not running; start
 it with your init system or run `dockerd` yourself, then run the command again.
 
+## Workspace on a Windows drive
+
+The Worker runs in the container as UID 1001 and must be allowed to change file permissions in
+the workspace, because Git does that every time it writes a repository's configuration. A Windows
+drive that WSL mounts without the `metadata` option, which is the default for `/mnt/c`, shows
+every file as owned by the mount's user (`uid=` in the output of `mount`) and lets no other user
+change a mode. The default workspace `.atlas/projects` is on such a drive when the checkout is.
+
+In such a workspace:
+
+- "New local repository" and "Clone from GitHub" are refused with the code
+  `workspace_permissions` and a message that names this section. The project is `failed` and no
+  folder is left behind, so the same folder name can be used again after the remedy. The Worker
+  also prints a warning when it starts.
+- Sessions on repositories that already exist keep working: creating the task worktree, the
+  agent's commits and the copy of its objects need no mode change. Inside a session the agent
+  cannot change a file's mode (`chmod +x`) and cannot write Git configuration (`git config`,
+  `git remote add`).
+
+To check, run `mount | grep ' /mnt/c '`: the drive is affected when the options do not contain
+`metadata` and `uid=` is not `1001`.
+
+Atlas does not change mounts for you. Choose one remedy; each was checked on 2026-11-27 in the
+Worker image as UID 1001 with `git init`, a configuration write, `remote add`, a fetch, a tracking
+checkout, `worktree add`, a commit and `chmod`:
+
+1. Turn on metadata for Windows drives. Add this to `/etc/wsl.conf`, run `wsl --shutdown` in
+   Windows (it stops every distribution and Docker) and start WSL again:
+
+   ```ini
+   [automount]
+   options = "metadata"
+   ```
+
+   It applies to every Windows drive in the distribution. Folders that existed before stay open to
+   every user, so existing projects and the workspace keep working. Files and folders made
+   afterwards get a real Linux owner and mode, so a folder your own WSL user creates later, for
+   example a new workspace root, is writable for the Worker only after `chmod 777` or
+   `chown 1001:1001`. The check used a separate mount with `metadata`, not `/etc/wsl.conf` itself.
+
+2. Mount the workspace folder over itself with UID 1001 as its owner. Paths stay the same and
+   existing projects stay where they are:
+
+   ```sh
+   mount -t drvfs 'C:\path\to\atlas\.atlas\projects' /mnt/c/path/to/atlas/.atlas/projects \
+     -o uid=1001,gid=1001
+   ```
+
+   The mount is gone after WSL restarts; repeat it before `pnpm dev`, or add it to `/etc/fstab`.
+   Git on the host then reports "dubious ownership" for these repositories unless you add them to
+   `safe.directory`.
+
+3. Keep the workspace on the Linux filesystem, in a folder UID 1001 owns and can reach (not below
+   a home directory with mode `0700`), and set `ATLAS_WORKSPACE_ROOT` to it in `.env`:
+
+   ```sh
+   mkdir -p /srv/atlas/projects && chown 1001:1001 /srv/atlas/projects
+   ```
+
+   Atlas does not move existing projects, and their sessions fail until their folders are in the new
+   workspace. Moving them was not tried: task worktrees hold absolute paths.
+
+The container is not started as the user that owns the mount. In a usual WSL setup that user is
+root or your own account, and the agent sandbox relies on the Worker being a separate,
+unprivileged user.
+
 ## Agent login
 
 Agents run as the container user `atlas` (UID 1001). Their login lives in the Docker volume
@@ -608,6 +674,10 @@ If the Worker is missing or offline:
 4. Confirm the workspace and state paths are accessible Linux paths, with Worker
    state outside the repository workspace. Preserve journals when investigating
    failed operations or reconnects.
+
+If a new repository or a clone fails with `workspace_permissions`, or with Git's
+`chmod on .../.git/config.lock failed: Operation not permitted`, see "Workspace on a Windows
+drive".
 
 For an occupied test port or missing browser dependency, report the environment
 problem separately from application failures. Do not weaken tests to hide it.
