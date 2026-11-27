@@ -22,9 +22,57 @@ const optionsSchema = z.object({
   }, 'Expected a loopback Board origin without a path'),
 });
 
+const authSchema = z.object({
+  appFile: z.string().min(1),
+  githubApiUrl: z.url().optional(),
+  githubWebUrl: z.url().optional(),
+});
+
+// What an owner code opens: `owner` makes a browser's sign-in the first owner; `reconnect` lets a
+// browser create a new GitHub App when an owner exists and the App file is missing.
+export type OwnerCodePurpose = 'owner' | 'reconnect';
+
+// Sign-in with GitHub. Absent means sign-in is off and the API behaves as before sign-in existed.
+export interface AuthOptions {
+  appFile: string;
+  githubApiUrl?: string;
+  githubWebUrl?: string;
+  ownerCodeSink?: (code: string, purpose: OwnerCodePurpose) => void;
+}
+
+const OWNER_CODE_HINTS: Record<OwnerCodePurpose, string> = {
+  owner: 'enter it on the setup page to become the owner',
+  reconnect:
+    'the GitHub connection is missing; enter it on the setup page to connect a new GitHub App',
+};
+
 export interface ApiOptions extends z.infer<typeof optionsSchema> {
   now?: () => Date;
   logger?: boolean;
+  // Sends the log to this stream instead of standard output, and turns the log on.
+  logStream?: { write(line: string): void };
+  auth?: AuthOptions;
+  // How often an open Board session socket checks that its session still exists.
+  sessionRecheckMs?: number;
+}
+
+const SESSION_RECHECK_MS = 30_000;
+
+export type ResolvedAuthOptions = Required<AuthOptions>;
+
+function resolveAuth(auth: AuthOptions | undefined): ResolvedAuthOptions | undefined {
+  if (!auth) return undefined;
+  const parsed = authSchema.parse(auth);
+  return {
+    appFile: parsed.appFile,
+    githubApiUrl: parsed.githubApiUrl ?? 'https://api.github.com',
+    githubWebUrl: parsed.githubWebUrl ?? 'https://github.com',
+    // The person running the API reads the code from its output; it never goes through the log.
+    ownerCodeSink:
+      auth.ownerCodeSink ??
+      ((code, purpose) =>
+        process.stdout.write(`Atlas owner code (${OWNER_CODE_HINTS[purpose]}): ${code}\n`)),
+  };
 }
 
 export function validateOptions(options: ApiOptions) {
@@ -33,6 +81,24 @@ export function validateOptions(options: ApiOptions) {
     ...parsed,
     now: () => (options.now?.() ?? new Date()).toISOString(),
     logger: options.logger ?? false,
+    logStream: options.logStream,
+    auth: resolveAuth(options.auth),
+    sessionRecheckMs: z
+      .int()
+      .positive()
+      .parse(options.sessionRecheckMs ?? SESSION_RECHECK_MS),
+  };
+}
+
+const authModeSchema = z.enum(['github', 'off']);
+
+function readAuth(env: NodeJS.ProcessEnv): AuthOptions | undefined {
+  // Any value other than github or off, the empty string included, stops the server at start.
+  if (authModeSchema.parse(env.ATLAS_AUTH ?? 'github') === 'off') return undefined;
+  return {
+    appFile: env.ATLAS_GITHUB_APP_FILE ?? '.atlas/github-app.json',
+    githubApiUrl: env.ATLAS_GITHUB_API_URL ?? 'https://api.github.com',
+    githubWebUrl: env.ATLAS_GITHUB_WEB_URL ?? 'https://github.com',
   };
 }
 
@@ -50,5 +116,6 @@ export function readConfig(env: NodeJS.ProcessEnv) {
       allowedOrigin: env.ATLAS_BOARD_ORIGIN ?? 'http://localhost:5173',
     }),
     logger: true,
+    auth: readAuth(env),
   };
 }

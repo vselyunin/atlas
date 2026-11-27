@@ -21,6 +21,7 @@ const env = {
   ATLAS_WORKER_NAME: 'Test Atlas worker',
   ATLAS_WORKSPACE_ROOT: join(directory, 'projects'),
   ATLAS_WORKER_STATE_DIR: join(directory, 'worker'),
+  ATLAS_AUTH: 'off',
 };
 if (env.FORCE_COLOR !== undefined) delete env.NO_COLOR;
 const children = [];

@@ -1,5 +1,7 @@
+export * from './auth.js';
 export * from './common.js';
 export * from './fixtures.js';
+export * from './github.js';
 export * from './http.js';
 export * from './projects.js';
 export * from './protocol.js';

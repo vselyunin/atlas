@@ -13,10 +13,32 @@ const agentSchema = z.object({
 });
 export type AgentSettings = z.infer<typeof agentSchema>;
 
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
+export function isLoopbackUrl(url: URL): boolean {
+  return LOOPBACK_HOSTS.includes(url.hostname);
+}
+
+// The Git host the Worker clones from. Plain http is for a local stand-in only, so a token is never
+// sent unencrypted over a network.
+const gitHostSchema = z
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return (
+      (url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackUrl(url))) &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash
+    );
+  }, 'Use an https:// Git host URL without credentials, or http:// to a loopback address')
+  .default('https://github.com');
+
 const configSchema = z.object({
   apiUrl: z.url().refine((value) => {
     const url = new URL(value);
-    return url.protocol === 'ws:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    return url.protocol === 'ws:' && LOOPBACK_HOSTS.includes(url.hostname);
   }, 'Use a local ws:// API URL'),
   token: z.string().regex(/^\S+$/),
   id: z
@@ -27,6 +49,7 @@ const configSchema = z.object({
   name: z.string().trim().min(1).max(200),
   root: z.string().min(1),
   stateDir: z.string().min(1),
+  gitHostUrl: gitHostSchema,
   agent: agentSchema.prefault({}),
 });
 export type WorkerConfigInput = z.input<typeof configSchema>;
@@ -54,6 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): WorkerConfigInput {
     name: env.ATLAS_WORKER_NAME ?? 'Local Atlas worker',
     root: resolve(env.ATLAS_WORKSPACE_ROOT ?? '.atlas/projects'),
     stateDir: resolve(env.ATLAS_WORKER_STATE_DIR ?? '.atlas/worker'),
+    gitHostUrl: env.ATLAS_GIT_HOST_URL,
     agent: {
       command: splitCommand(env.ATLAS_AGENT_COMMAND),
       sandbox: env.ATLAS_AGENT_SANDBOX,

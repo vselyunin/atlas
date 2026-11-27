@@ -11,12 +11,18 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { CommandOutcomeSchema, RepositoryInitCommandSchema } from '@atlas/contracts';
+import {
+  CommandOutcomeSchema,
+  RepositoryCloneCommandSchema,
+  RepositoryInitCommandSchema,
+} from '@atlas/contracts';
 
+// Entries written before clones existed hold an init command and never the `cloned` stage.
+// A clone is journaled `cloned` only after every Git step of the clone has exited successfully.
 const EntrySchema = z.object({
-  command: RepositoryInitCommandSchema,
+  command: z.union([RepositoryInitCommandSchema, RepositoryCloneCommandSchema]),
   target: z.string(),
-  stage: z.enum(['queued', 'created', 'finished']),
+  stage: z.enum(['queued', 'created', 'cloned', 'finished']),
   identity: z.object({ dev: z.number(), ino: z.number() }).nullable(),
   outcome: CommandOutcomeSchema.nullable(),
   acknowledged: z.boolean(),

@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { promisify, isDeepStrictEqual } from 'node:util';
 import type { CommandOutcome, RepositoryInitCommand } from '@atlas/contracts';
 import { RepositoryInitCommandSchema } from '@atlas/contracts';
+import { childEnvironment } from '../git-environment.js';
 import type { JournalEntry } from '../state/journal.js';
 import type { Journal } from '../state/journal.js';
 import { resolveTarget } from './paths.js';
@@ -43,6 +44,7 @@ export async function recoverCommand(
     const { stdout } = await run(context.git ?? 'git', ['rev-parse', '--show-toplevel'], {
       cwd: target,
       timeout: 10_000,
+      env: childEnvironment(context.root),
     });
     if (stdout.trim() !== target) throw new Error('Unexpected Git working directory');
     return { status: 'succeeded', localPath: target };
@@ -108,6 +110,7 @@ export async function initializeRepository(
     await run(context.git ?? 'git', ['init', '--quiet', '--', target], {
       timeout: 30_000,
       maxBuffer: 64 * 1024,
+      env: childEnvironment(context.root),
     });
     outcome = { status: 'succeeded', localPath: target };
   } catch (error) {

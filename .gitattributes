@@ -1,0 +1,2 @@
+# Shell scripts run inside the Worker image; a CR at a line end would break them.
+*.sh text eol=lf

@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { ErrorInfoSchema, IdSchema, NameSchema, RelativePathSchema } from './common.js';
+import {
+  ErrorInfoSchema,
+  IdSchema,
+  NameSchema,
+  RelativePathSchema,
+  TimestampSchema,
+} from './common.js';
 import { API_BASE_PATH } from './http.js';
 import {
   SessionExitPayloadSchema,
@@ -10,7 +16,12 @@ import {
   SessionStartedPayloadSchema,
   SessionStopPayloadSchema,
 } from './sessions.js';
-import { AGENT_SESSION_CAPABILITY, REPOSITORY_INIT_CAPABILITY } from './workers.js';
+import { GithubFullNameSchema } from './github.js';
+import {
+  AGENT_SESSION_CAPABILITY,
+  REPOSITORY_CLONE_CAPABILITY,
+  REPOSITORY_INIT_CAPABILITY,
+} from './workers.js';
 
 export const WORKER_CONNECT_PATH = `${API_BASE_PATH}/workers/connect`;
 export const PROTOCOL_VERSION = 1;
@@ -20,6 +31,10 @@ export const HEARTBEAT_INTERVAL_MS = 10_000;
 export const HEARTBEAT_STALE_MS = 30_000;
 export const RECONNECT_INITIAL_DELAY_MS = 500;
 export const RECONNECT_MAX_DELAY_MS = 30_000;
+// How long after dispatch the API still grants a credential for a clone.
+export const CREDENTIAL_GRANT_WINDOW_MS = 900_000;
+// How long the Worker waits for a reply to a credential request.
+export const CREDENTIAL_REPLY_TIMEOUT_MS = 30_000;
 
 const envelope = {
   protocolVersion: z.literal(PROTOCOL_VERSION),
@@ -36,9 +51,15 @@ export const WorkerRegisterSchema = z.strictObject({
     name: NameSchema,
     workspaceRoot: z.string(),
     // Workers that predate agent sessions advertise only repository initialization.
+    // Workers that predate cloning omit the clone capability.
     capabilities: z.union([
       z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY)]),
       z.tuple([z.literal(REPOSITORY_INIT_CAPABILITY), z.literal(AGENT_SESSION_CAPABILITY)]),
+      z.tuple([
+        z.literal(REPOSITORY_INIT_CAPABILITY),
+        z.literal(AGENT_SESSION_CAPABILITY),
+        z.literal(REPOSITORY_CLONE_CAPABILITY),
+      ]),
     ]),
   }),
 });
@@ -66,6 +87,49 @@ export const RepositoryInitCommandSchema = z.strictObject({
     projectId: IdSchema,
     relativePath: RelativePathSchema,
   }),
+});
+
+// The credential never travels in the command: the Worker asks for one by command ID.
+export const RepositoryCloneCommandSchema = z.strictObject({
+  ...commandEnvelope,
+  type: z.literal('command.dispatch'),
+  payload: z.strictObject({
+    kind: z.literal(REPOSITORY_CLONE_CAPABILITY),
+    projectId: IdSchema,
+    relativePath: RelativePathSchema,
+    repository: GithubFullNameSchema,
+  }),
+});
+
+export const CommandDispatchSchema = z.strictObject({
+  ...commandEnvelope,
+  type: z.literal('command.dispatch'),
+  payload: z.discriminatedUnion('kind', [
+    RepositoryInitCommandSchema.shape.payload,
+    RepositoryCloneCommandSchema.shape.payload,
+  ]),
+});
+
+export const CredentialRequestSchema = z.strictObject({
+  ...commandEnvelope,
+  type: z.literal('credential.request'),
+  payload: emptyPayload,
+});
+
+export const CredentialGrantSchema = z.strictObject({
+  ...commandEnvelope,
+  type: z.literal('credential.grant'),
+  payload: z.strictObject({
+    token: z.string().min(1),
+    expiresAt: TimestampSchema,
+    repository: GithubFullNameSchema,
+  }),
+});
+
+export const CredentialRefusalSchema = z.strictObject({
+  ...commandEnvelope,
+  type: z.literal('credential.refusal'),
+  payload: ErrorInfoSchema,
 });
 
 export const CommandAcceptedSchema = z.strictObject({
@@ -143,6 +207,7 @@ export const WorkerToApiMessageSchema = z.discriminatedUnion('type', [
   WorkerHeartbeatSchema,
   CommandAcceptedSchema,
   CommandResultSchema,
+  CredentialRequestSchema,
   ProtocolErrorSchema,
   SessionStartedSchema,
   SessionOutputSchema,
@@ -151,8 +216,10 @@ export const WorkerToApiMessageSchema = z.discriminatedUnion('type', [
 
 export const ApiToWorkerMessageSchema = z.discriminatedUnion('type', [
   WorkerRegisteredSchema,
-  RepositoryInitCommandSchema,
+  CommandDispatchSchema,
   CommandResultAckSchema,
+  CredentialGrantSchema,
+  CredentialRefusalSchema,
   ProtocolErrorSchema,
   SessionStartSchema,
   SessionInputSchema,
@@ -168,6 +235,11 @@ export type WorkerRegister = z.infer<typeof WorkerRegisterSchema>;
 export type WorkerRegistered = z.infer<typeof WorkerRegisteredSchema>;
 export type WorkerHeartbeat = z.infer<typeof WorkerHeartbeatSchema>;
 export type RepositoryInitCommand = z.infer<typeof RepositoryInitCommandSchema>;
+export type RepositoryCloneCommand = z.infer<typeof RepositoryCloneCommandSchema>;
+export type CommandDispatch = z.infer<typeof CommandDispatchSchema>;
+export type CredentialRequest = z.infer<typeof CredentialRequestSchema>;
+export type CredentialGrant = z.infer<typeof CredentialGrantSchema>;
+export type CredentialRefusal = z.infer<typeof CredentialRefusalSchema>;
 export type CommandAccepted = z.infer<typeof CommandAcceptedSchema>;
 export type CommandOutcome = z.infer<typeof CommandOutcomeSchema>;
 export type CommandResult = z.infer<typeof CommandResultSchema>;

@@ -20,7 +20,7 @@ try {
   }
 } catch {
   console.error(
-    'Atlas API could not start. Check the loopback port, database path and Worker token configuration.',
+    'Atlas API could not start. Check the loopback port, database path, Worker token and ATLAS_AUTH (github or off) configuration.',
   );
   process.exitCode = 1;
 }

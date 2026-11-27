@@ -42,6 +42,8 @@ To request local repository initialization, send this body to the same route.
 
 The 202 response contains an operation. Fetch it by ID to follow provisioning. `connectionLost` records a transport interruption independently of the execution outcome. A successful operation exposes its `result.localPath`. When a project creation response is lost, refresh the project list before offering another attempt. Clients never retry this POST automatically.
 
+A relative path whose first part starts with a dot is refused: the API answers 400 `invalid_relative_path` and the Worker refuses it too, because `.atlas-worktrees` holds the task worktrees. This applies to every `local` project. Clients that sent such a path before now receive the 400; the `existing` form has no path and is unaffected.
+
 Names and titles are trimmed and limited to 1–200 characters. Descriptions accept 0–100,000 characters. Relative paths accept 1–1,024 characters. IDs are opaque nonempty strings and timestamps are UTC ISO strings. Version names within a project are unique after trimming and compare case-sensitively.
 
 ### Task revisions and ordering
@@ -68,13 +70,15 @@ The optional creation status extends the HTTP request only. Existing callers tha
 
 ### Errors
 
-| Status | Meaning                                                                         |
-| ------ | ------------------------------------------------------------------------------- |
-| 400    | Invalid input                                                                   |
-| 403    | Forbidden state or origin                                                       |
-| 404    | Unknown entity                                                                  |
-| 409    | Revision conflict or other conflicting state, including duplicate version names |
-| 503    | Worker unavailable                                                              |
+| Status | Meaning                                                                                              |
+| ------ | ---------------------------------------------------------------------------------------------------- |
+| 400    | Invalid input                                                                                        |
+| 401    | No valid session while sign-in is on (`sign_in_required`)                                            |
+| 403    | Forbidden state, origin or role, including `owner_required` and `owner_code_invalid`                 |
+| 404    | Unknown entity                                                                                       |
+| 409    | Revision conflict or other conflicting state, including duplicate version names and `setup_required` |
+| 502    | GitHub did not answer as expected (`github_unavailable`)                                             |
+| 503    | Worker unavailable                                                                                   |
 
 Errors use an `{error:{code,message,details?}}` envelope. For example, a PATCH with no revision can return the schema validation error below.
 
@@ -89,6 +93,78 @@ Errors use an `{error:{code,message,details?}}` envelope. For example, a PATCH w
 ```
 
 Map schema parsing failures to the public error envelope and keep internal stacks out of response bodies. Clients validate any optional details against an expected schema before displaying them and render them as text.
+
+## Sign-in and setup
+
+Sign-in is controlled by the API setting `ATLAS_AUTH`: `github` (default) or `off`; any other value stops the API at start. `buildApp` called from code without sign-in options runs with sign-in off. The server entry point always reads the setting. With sign-in off the API behaves as before this section existed: none of the routes below except `GET /auth/state` exist (they answer 404, `GET /github/connection` among them), and no route needs a session. `GET /auth/state` then answers `{auth:"off",setup:"not_needed",user:null,app:null}`. The repository and link routes in "Repository links" are the exception: they exist and answer 409 `github_unavailable`.
+
+With sign-in on, every HTTP route and the Board session socket need a session, except routes marked `public`, `setup` or `worker` below. The session is the `atlas_session` cookie. Without one the API answers 401 `sign_in_required`. Until the GitHub App exists (the App file is missing), every route that needs a session answers 409 `setup_required`. The checks on `Host`, `Origin` and the JSON content type stay. Browsers must send `DELETE` requests with a JSON content type and the body `{}`; `DELETE` is in the CORS method list.
+
+| Method | Path under `/api/v1`     | Access   | Body and answer                                                                                                                                              |
+| ------ | ------------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GET    | `/auth/state`            | `public` | `{auth:"off"\|"github",setup:"not_needed"\|"needed"\|"needs_owner"\|"reconnect"\|"done",user,app}`                                                           |
+| GET    | `/auth/github/start`     | `public` | 303 to GitHub's authorize page; sets `atlas_signin` for 10 minutes                                                                                           |
+| GET    | `/auth/github/callback`  | `public` | 303 to the Board; sets `atlas_session` after a successful sign-in                                                                                            |
+| POST   | `/auth/sign-out`         | `public` | 204; deletes the session and clears the cookie                                                                                                               |
+| POST   | `/setup/github/start`    | `setup`  | `{organization?}`, answers `{action,manifest}`, the form the Board posts to GitHub                                                                           |
+| GET    | `/setup/github/callback` | `setup`  | 303 to the Board with the outcome; writes the App file                                                                                                       |
+| POST   | `/setup/owner-code`      | `setup`  | `{code}`, answers 204 and sets `atlas_setup_mark` before an owner exists, `atlas_setup_reconnect` for a reconnect; 403 `owner_code_invalid` for a wrong code |
+| GET    | `/github/connection`     | session  | `{connection:{name,slug,account,manageUrl,installUrl}}`, read from GitHub                                                                                    |
+| GET    | `/members`               | session  | `{items: Member[]}`; a member is `{id,login,name,role,signedIn}`                                                                                             |
+| POST   | `/members`               | `owner`  | `{login}`, answers 201 `{member}`; 409 `member_exists`                                                                                                       |
+| DELETE | `/members/:userId`       | `owner`  | `{}`, answers 204; 404 `member_not_found`, 409 `owner_not_removable`                                                                                         |
+
+`access` is the route's own setting. `public`: no session needed; the route reads the session itself when it needs one. `setup`: anyone while the database has no owner, the owner's session after that. The exception is a reconnect: while an owner exists and the App file is missing, a request with a valid `atlas_setup_reconnect` cookie may use every `setup` route, and `POST /setup/owner-code` is open to anyone while the code printed at start is unused. A reconnect never creates, replaces or changes the owner. `worker`: the Worker socket, which keeps its token check and ignores sessions. `owner`: the owner's session. A route with no value needs any session. The `user` in the auth state is `{id,login,name,avatarUrl,role}` or `null`. `setup` is `needed` while the App file is missing and this browser may run setup (no owner yet, the owner's session, or the reconnect cookie), and `reconnect` while an owner exists, the App file is missing and this browser may not run setup until it enters the owner code. `app` is `{name,account,installUrl}` or `null`; it is filled for a signed-in user, and during setup before an owner exists. A test lists every registered route with its access and checks that each refuses a request without a session, apart from these exceptions.
+
+Cookies, all `HttpOnly` and `SameSite=Lax`, and `Secure` when the Board origin is `https`:
+
+| Cookie                  | Holds                                                                                         | Lifetime                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `atlas_session`         | Random session ID; the database keeps only its hash                                           | 30 days from last use; the cookie is kept for 400 days so the browser does not drop a session in use |
+| `atlas_signin`          | Sign-in `state` and PKCE verifier                                                             | 10 minutes                                                                                           |
+| `atlas_setup_state`     | Binds a setup `state` to the browser                                                          | 1 hour                                                                                               |
+| `atlas_setup_mark`      | Lets this browser's first sign-in become the owner                                            | 30 days; the API ends it with the owner                                                              |
+| `atlas_setup_reconnect` | Lets this browser run setup while an owner exists and the App file is missing; path `/api/v1` | 1 day; the API ends it when the App file is written                                                  |
+
+The two callbacks carry a code and `state` in their query string. The API omits that query string from its request log and answers every outcome with a redirect to the Board, reporting the result in the Board's address (`?setup=created`, `?setup=failed&reason=…`, `?signin=failed&reason=…&login=…`). A `state` works once and expires: one hour for setup, 10 minutes for sign-in. Pending values live in memory, so an API restart cancels them. Setup is refused with 409 `setup_done` while the App file exists.
+
+The App file, its secrets and the one-time owner code never appear in a response or the log. The owner code is written only to the API's standard output at start. The API issues one at start while the App file exists and no owner does, and also while an owner exists and the App file is missing (a reconnect); the printed line says which. Only its hash is stored, and it works once.
+
+Compatibility: `reconnect` is a new value of `setup` in `GET /auth/state`. The Board validates the auth state strictly, so an older Board shows an error in that state; update the Board together with the API.
+
+### Board session socket and sessions
+
+With sign-in on, the upgrade of `/api/v1/tasks/:taskId/session` needs a session in addition to the `Origin` check. The API checks the session again every 30 seconds while the socket is open, and at once on sign-out and on member removal. When the session has ended it closes the socket with code 4401.
+
+### Repository links
+
+These routes need a session and, like every route that talks to GitHub, answer 409 `setup_required` before the App exists. Any signed-in person, member or owner, can use them.
+
+| Method | Path under `/api/v1`               | Body and answer                                                                                        |
+| ------ | ---------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| GET    | `/github/repositories`             | `{items:{id,fullName,private,defaultBranch}[]}`, the repositories the App can access, read from GitHub |
+| GET    | `/projects/:projectId/github-link` | `{link: null \| {projectId,repositoryId,fullName,defaultBranch,accessible,createdAt}}`                 |
+| POST   | `/projects/:projectId/github-link` | `{repositoryId}`, answers 201 `{link}`                                                                 |
+| DELETE | `/projects/:projectId/github-link` | `{}`, answers 204                                                                                      |
+
+Errors:
+
+| Status and code                 | When                                                                                                                      |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 404 `project_not_found`         | The project does not exist                                                                                                |
+| 409 `project_not_linkable`      | Link: the project is not a `local` project in state `ready`. Unlink: the project's clone is still `pending` or `accepted` |
+| 409 `already_linked`            | The project already has a link; unlink it first                                                                           |
+| 403 `repository_not_accessible` | Link: GitHub says the App cannot access that repository                                                                   |
+| 404 `link_not_found`            | Unlink: the project has no link                                                                                           |
+| 409 `setup_required`            | The App file does not exist                                                                                               |
+| 409 `github_unavailable`        | Sign-in is off                                                                                                            |
+| 502 `github_unavailable`        | GitHub failed or did not answer within 10 seconds                                                                         |
+
+A project has at most one link, but one repository can be linked to several projects. Linking stores the repository's ID, its `owner/name` and its default branch as GitHub reported them then, and the person who linked it. It sends nothing to a Worker and does not check that the repository's history matches the project's. `accessible` is asked of GitHub on every `GET`: `false` means the App no longer covers the repository (it was removed from the App's selection, or the App was replaced) or that GitHub could not be reached just now; this `GET` never answers 502. The stored name and branch are not refreshed.
+
+### Compatibility
+
+This part adds routes and a requirement. It changes no Worker message, capability or stored project shape. The Worker socket does not use sessions. A Board built before this change cannot sign in, so with sign-in on its requests fail with 401 or 409; deploy the Board with the API, or run the API with `ATLAS_AUTH=off`. Existing tests call the API with sign-in off, so they are unchanged.
 
 ## Worker WebSocket
 
@@ -110,7 +186,7 @@ All messages use protocol version `1`. Command messages require a nonempty `comm
 | Worker → API | `worker.register`    | `{workerId,name,workspaceRoot,capabilities}`; see [capabilities](#capabilities)                   |
 | API → Worker | `worker.registered`  | `{workerId,heartbeatIntervalMs:10000}`                                                            |
 | Worker → API | `worker.heartbeat`   | `{workerId}`                                                                                      |
-| API → Worker | `command.dispatch`   | `{kind:"repository.init",projectId,relativePath}`                                                 |
+| API → Worker | `command.dispatch`   | `{kind:"repository.init",projectId,relativePath}` or the [clone form](#clone-and-credentials)     |
 | Worker → API | `command.accepted`   | `{}`                                                                                              |
 | Worker → API | `command.result`     | `{status:"succeeded",localPath}` or `{status:"failed" \| "needs_attention",error:{code,message}}` |
 | API → Worker | `command.result_ack` | `{}`                                                                                              |
@@ -126,7 +202,58 @@ The API redispatches unresolved commands with their original IDs after reconnect
 
 ### Capabilities
 
-A Worker registers with `["repository.init"]` or `["repository.init","agent.session"]`. The API rejects any other list. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it.
+A Worker registers with `["repository.init"]`, `["repository.init","agent.session"]` or `["repository.init","agent.session","repository.clone"]`. The API rejects any other list, including `["repository.init","repository.clone"]`. The second form was added with agent sessions; a Worker that sends only the first form still registers, and the API refuses to start a session on it. The third form was added with cloning.
+
+Compatibility in both directions:
+
+- An older API refuses a newer Worker's registration, because its validator does not know the third list. Update the API before the Worker.
+- A newer API accepts an older Worker. It never sends a Worker without `repository.clone` a clone command or a credential message.
+
+### Clone and credentials
+
+The clone command is a `command.dispatch` whose payload is `{kind:"repository.clone",projectId,relativePath,repository}`. `repository` is a GitHub full name such as `team/project`, never a URL, and the payload is strict, so a `token` field is rejected: the credential never travels inside the command. The Worker answers with the usual `command.accepted` and `command.result`.
+
+The Worker asks for a credential when it needs one, over the same connection.
+
+| Direction    | Type                 | Payload                                                     |
+| ------------ | -------------------- | ----------------------------------------------------------- |
+| Worker → API | `credential.request` | `{}`; the `commandId` names the clone                       |
+| API → Worker | `credential.grant`   | `{token,expiresAt,repository}`                              |
+| API → Worker | `credential.refusal` | `{code,message}`; the `commandId` is the one that was asked |
+
+The API grants a credential only for a clone it dispatched to that Worker, for the repository in that command, and only within 900,000 ms (15 minutes) after dispatch. The Worker waits at most 30,000 ms for a reply. The token is short-lived, is held in memory and is never written to the database, the Worker journal, a Git configuration, a command line or a log.
+
+The Worker registers `repository.clone` and sends one `credential.request` per clone after it has created and journaled the target folder. A refusal fails the clone with its code and message. A grant whose `repository` differs from the command's fails it with `repository_renamed` before Git contacts the host. When no reply arrives within 30,000 ms, the connection drops or the Worker stops, the clone ends as `needs_attention`. Replies for a command ID with no pending request are ignored. A clone journaled without reaching the `cloned` stage recovers as `needs_attention` (`recovery_uncertain`). A clone still queued when the Worker stops is not started and gets no result, so the API dispatches it again.
+
+The API answers a request it does not grant with a `credential.refusal` whose `code` is one of these, never with a `protocol.error`. The checks that need no GitHub call come first; GitHub is asked last.
+
+| Code                        | When                                                                                                                       |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `unknown_command`           | No command has this ID                                                                                                     |
+| `wrong_connection`          | The command belongs to another Worker, or was not last dispatched on this connection                                       |
+| `command_finished`          | The command already has a result                                                                                           |
+| `wrong_kind`                | The command is not a clone                                                                                                 |
+| `already_granted`           | A credential was already given or is being asked for on this dispatch, or GitHub was asked 3 times                         |
+| `grant_window_closed`       | More than 900,000 ms have passed since the latest dispatch                                                                 |
+| `github_unavailable`        | Sign-in is off, the App file is missing or unreadable, GitHub failed or did not answer within 20 s, or the API is stopping |
+| `app_file_exposed`          | The App file lies inside a registered Worker's workspace root                                                              |
+| `repository_not_accessible` | The project has no link, or the App no longer covers the linked repository                                                 |
+
+A refusal for another Worker's command names nothing about it. The API asks GitHub for the repository's current name and then for an installation token limited to the linked repository ID with `contents: read`, and gives GitHub at most 20 seconds in all so that the refusal reaches the Worker within its 30-second wait; a token GitHub hands out after that is revoked at once. The window counts from the latest dispatch and limits only when a grant may be issued: a clone sent again after a reconnect can be granted again on the new connection, and a token granted inside the window stays valid after the window closes. A re-dispatch alone revokes nothing, because a Worker that reconnected may still be fetching with its token; a new grant for the command revokes the earlier tokens without waiting for GitHub. At most 3 requests per dispatch reach GitHub. A granted token is revoked at the first of: the command's result (also one the API rejects, such as a wrong result path), 61 minutes after the grant (the Worker's two 30-minute Git time limits and a minute's margin), and the API stopping (best-effort, each revocation bounded by the 10-second GitHub timeout). A clone still talking to GitHub when the API stops or restarts therefore fails with `git_failed`; in development the API's file watcher restarts it on every source change. A grant whose connection closed before it could be sent is revoked at once. The broker's state is in memory only, so an API restart forgets it; a token not revoked then expires within an hour. The API logs one line per grant and per refusal naming the command, the Worker, the repository and the rights (`contents:read`), never the token.
+
+Two Git processes hold the token, one after the other: `git ls-remote --symref` reads the default branch, because Git 2.39 in the Worker image cannot record it during a fetch, and `git fetch` downloads the branches. Both read the token from one environment variable through the Worker's credential helper. Both run with the same locked-down settings: no system or user Git configuration, no other credential helper, TLS verification on, no extra headers, no redirects, HTTPS only, no submodules, no hooks and no background maintenance. Setting `origin` and checking out run in Git processes that never hold the token. Because the two token-holding processes ignore the system Git configuration, a system `http.proxy` or `http.sslCAInfo` is not used for a clone. Each of them is ended after 30 minutes (`clone_timeout`); the local steps are limited to 10 minutes each. The Worker builds the address from its `ATLAS_GIT_HOST_URL` setting (default `https://github.com`; plain `http` only for a loopback address).
+
+### Project creation
+
+The `local` repository form of `POST /projects` accepts an optional `githubRepositoryId` (positive integer). The `existing` form rejects it. Stored projects and `Repository` responses do not carry it. Older strict validators reject the field, so deploy the updated API before a Board that sends it.
+
+With sign-in on, a create with `githubRepositoryId` clones that repository. The API answers 503 `worker_unavailable` unless the Worker is online and registered `repository.clone`, then confirms with GitHub that the App can access the repository before writing anything: 403 `repository_not_accessible` when it cannot, 502 `github_unavailable` when GitHub fails, 409 `setup_required` without an App file, 502 `github_unavailable` with an unreadable one. On success it answers 202 and writes the `local` project, its operation and the project's link (read it at `GET /projects/:projectId/github-link`) in one transaction, then dispatches the clone command with the repository's `owner/name` as stored in the link. The operation and project responses keep their shape. While the clone is pending or accepted, `DELETE /projects/:projectId/github-link` answers 409 `project_not_linkable`, because the clone needs the link to be sent again after a reconnect. With sign-in off there is no GitHub App: a create with `githubRepositoryId` answers 409 `github_unavailable` and writes nothing.
+
+A clone that fails, or ends `needs_attention`, leaves its folder on the Worker, as `repository.init` does (a clone refused as `invalid_target` or `invalid_repository` creates none, and an existing folder is left untouched), and the project stays `failed` or `needs_attention`. The API has no retry, cancel or delete for a project: to try again, create a new project with another folder name, or remove the folder on the Worker's disk first and use its name again after checking what is in it. A clone stuck `pending` or `accepted` (for example a Worker that never comes back) keeps blocking `DELETE /projects/:projectId/github-link`, and nothing cancels it. A clone sent to a Worker that has gone offline waits and is sent again when that Worker registers again, with the same command ID.
+
+A second clone queued on the same Worker behind a clone that runs longer than 15 minutes is refused with `grant_window_closed`: the window counts from dispatch, and the Worker starts commands one at a time. The refused clone leaves its folder, so the new project needs another folder name or the folder removed first.
+
+Compatibility of this part: `githubRepositoryId` is new and the create request is strict, so an older API rejects it; deploy the API before the Board. The command kind, the capability and the three credential messages are new (see above); no existing message changes. A Worker without `repository.clone` keeps working for `repository.init` and sessions. An existing project whose path starts with a dot can no longer start a session: the Worker applies the same path rule when a session starts, and the session ends at once with the message "Choose a relative folder path without dot segments, not starting with a dot". Atlas cannot change a stored project's path, so such a project has to be created again under another name.
 
 ## Agent sessions
 

@@ -1,13 +1,18 @@
 import { API_BASE_PATH, BoardToApiSessionMessageSchema } from '@atlas/contracts';
 import type { FastifyInstance } from 'fastify';
+import { SESSION_COOKIE } from '../auth/sessions.js';
+import type { SessionStore } from '../auth/sessions.js';
 import { ApiError } from '../http/errors.js';
 import type { SessionHub } from './hub.js';
 
 // Spike: the Board attaches to a task's agent terminal over this socket.
+// The route has no `access` value, so with sign-in on the upgrade requires a session.
+// `authSessions` is given only while sign-in is on.
 export function registerSessionRoutes(
   app: FastifyInstance,
   hub: SessionHub,
   allowedOrigin: string,
+  authSessions?: SessionStore,
 ) {
   app.route<{ Params: { taskId: string } }>({
     method: 'GET',
@@ -22,6 +27,12 @@ export function registerSessionRoutes(
     websocket: true,
     handler(socket, request) {
       const { taskId } = request.params;
+      // With sign-in on, the upgrade passed the session check; the socket lives only as long as
+      // that session does.
+      const rawId = request.cookies[SESSION_COOKIE];
+      if (authSessions && request.user && rawId) {
+        hub.watch(socket, request.user.id, () => authSessions.find(rawId) !== null);
+      }
       hub.attach(taskId, socket);
       socket.on('close', () => hub.detach(taskId, socket));
       socket.on('message', (data, binary) => {

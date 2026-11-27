@@ -24,6 +24,43 @@ Pinned agent tools, installed globally:
 Git, bubblewrap, socat and ripgrep come from Debian bookworm. The system Git config sets
 `safe.directory = *` because the mounted workspace belongs to the host user.
 
+## Git version and clone flaws
+
+Checked on 2026-11-25 for repository cloning: the image's Git is `2.39.5`, Debian package
+`1:2.39.5-0+deb12u3`, which was also the bookworm candidate that day. Debian's changelog
+(`apt-get changelog git`; the slim image does not ship it) lists the backported fixes for the known
+clone flaws: CVE-2024-32002, CVE-2024-32004, CVE-2024-32020 and CVE-2024-32021 (`deb12u1`),
+CVE-2024-50349 and CVE-2024-52006 in the credential protocol (`deb12u2`), and CVE-2025-48384 and
+CVE-2025-48385 (`deb12u3`). The image is not affected by those. The Worker's clone also avoids their
+triggers: it never recurses into submodules or clones from a local path, builds the address from a
+validated `owner/name`, answers credentials only through its own helper for the configured host,
+and runs every Git step with hooks off. Rebuilding the image picks up later Debian fixes.
+
+## Cloning from GitHub
+
+What the image needs for `repository.clone`:
+
+- Git 2.39 or newer with HTTPS support and `ca-certificates`, both from the image's Debian
+  packages. Git 2.39 cannot report a remote's default branch while it fetches, so the Worker runs
+  `git ls-remote --symref` first; both commands hold the token, one after the other.
+- The credential helper `git-credential-helper.sh`. The Worker's build copies it next to the
+  compiled code (`dist/repositories`), so it ships inside the image and needs no setup. Git runs
+  it with `/bin/sh` and it answers only for the configured Git host. It reads the token from one
+  environment variable of that Git process and never writes it anywhere.
+- `ATLAS_GIT_HOST_URL`, when the Git host is not `https://github.com`. `pnpm dev` passes it to the
+  container if it is set. `http` is accepted only for a loopback address. The image contains no
+  token and no GitHub address of its own.
+
+The Worker runs these Git processes itself, outside the agent sandbox, with a cleaned
+environment: every `ATLAS_*` and `GIT_*` variable is removed (except `GIT_CEILING_DIRECTORIES`,
+which the Worker sets), and the user Git configuration is ignored. The two processes that hold the
+token then get one added variable, `ATLAS_GIT_TOKEN`, which the credential helper reads, and also
+ignore the system configuration, so the image's `safe.directory` entry and any system `http.proxy` or
+`sslCAInfo` are not used for them. Other inherited variables stay, for example `HTTPS_PROXY` or
+`SSL_CERT_FILE`, so a proxy or CA bundle set in the container's environment still applies. The agent sandbox cannot read the Worker's environment (an agent
+sees only its own processes) or the Worker state directory, and it does not allow GitHub's hosts
+unless `ATLAS_AGENT_ALLOWED_DOMAINS` lists them; do not add them.
+
 ## Seccomp profile
 
 The agent sandbox uses bubblewrap, which needs `clone`, `clone3`, `unshare`, `mount`, `umount2` and

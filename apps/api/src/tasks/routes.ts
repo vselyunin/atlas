@@ -29,6 +29,7 @@ export function registerTaskRoutes(app: FastifyInstance, context: ApiContext) {
       projectId,
       versionId,
       parseInput(TaskCreateSchema, request.body),
+      request.user?.id,
     );
     return reply.code(201).send(TaskResponseSchema.parse({ task }));
   });

@@ -5,9 +5,19 @@ import type {
   TaskStatus,
   TaskType,
   Priority,
+  UserRole,
   Worker,
 } from '@atlas/contracts';
-import { foreignKey, index, integer, sqliteTable, text, unique } from 'drizzle-orm/sqlite-core';
+import { getTableColumns, sql } from 'drizzle-orm';
+import {
+  foreignKey,
+  index,
+  integer,
+  sqliteTable,
+  text,
+  unique,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 
 export const workers = sqliteTable('workers', {
   id: text().primaryKey().notNull(),
@@ -25,6 +35,7 @@ export const projects = sqliteTable('projects', {
   repository: text({ mode: 'json' }).$type<Repository>().notNull(),
   state: text().$type<Project['state']>().notNull(),
   operationId: text(),
+  createdBy: text(),
   createdAt: text().notNull(),
   updatedAt: text().notNull(),
 });
@@ -50,6 +61,7 @@ export const operations = sqliteTable(
       .notNull()
       .references(() => projects.id)
       .unique(),
+    kind: text().notNull().default('repository.init'),
     workerId: text()
       .notNull()
       .references(() => workers.id),
@@ -78,6 +90,7 @@ export const tasks = sqliteTable(
     assigneeId: text().references(() => workers.id),
     position: integer().notNull(),
     revision: integer().notNull(),
+    createdBy: text(),
     createdAt: text().notNull(),
     updatedAt: text().notNull(),
   },
@@ -89,3 +102,54 @@ export const tasks = sqliteTable(
     index('tasks_column_order').on(table.projectId, table.versionId, table.status, table.position),
   ],
 );
+
+// createdBy is recorded but is not part of the shared contracts; select these to read a row.
+function withoutCreatedBy<T extends Record<string, unknown>>(columns: T) {
+  return Object.fromEntries(
+    Object.entries(columns).filter(([name]) => name !== 'createdBy'),
+  ) as Omit<T, 'createdBy'>;
+}
+export const projectFields = withoutCreatedBy(getTableColumns(projects));
+export const taskFields = withoutCreatedBy(getTableColumns(tasks));
+
+export const users = sqliteTable(
+  'users',
+  {
+    id: text().primaryKey().notNull(),
+    githubId: integer().unique(),
+    login: text().notNull(),
+    name: text(),
+    avatarUrl: text(),
+    role: text().$type<UserRole>().notNull(),
+    createdAt: text().notNull(),
+  },
+  (table) => [uniqueIndex('users_login').on(sql`lower(${table.login})`)],
+);
+
+// Only the SHA-256 of a session ID is stored.
+export const authSessions = sqliteTable('auth_sessions', {
+  idHash: text().primaryKey().notNull(),
+  userId: text()
+    .notNull()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: text().notNull(),
+  lastUsedAt: text().notNull(),
+});
+
+// Setup secrets kept as hashes: the setup mark and the owner code.
+export const installation = sqliteTable('installation', {
+  key: text().primaryKey().notNull(),
+  value: text().notNull(),
+});
+
+export const githubLinks = sqliteTable('github_links', {
+  projectId: text()
+    .primaryKey()
+    .notNull()
+    .references(() => projects.id),
+  repositoryId: integer().notNull(),
+  fullName: text().notNull(),
+  defaultBranch: text().notNull(),
+  createdBy: text(),
+  createdAt: text().notNull(),
+});

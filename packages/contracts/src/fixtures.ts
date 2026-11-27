@@ -1,12 +1,22 @@
 import { OperationSchema, ProjectSchema } from './projects.js';
 import type { Operation, Project } from './projects.js';
-import { CommandResultSchema, PROTOCOL_VERSION, RepositoryInitCommandSchema } from './protocol.js';
-import type { CommandResult, RepositoryInitCommand } from './protocol.js';
+import {
+  CommandResultSchema,
+  PROTOCOL_VERSION,
+  RepositoryCloneCommandSchema,
+  RepositoryInitCommandSchema,
+} from './protocol.js';
+import type { CommandResult, RepositoryCloneCommand, RepositoryInitCommand } from './protocol.js';
 import { TaskSchema } from './tasks.js';
 import type { Task } from './tasks.js';
 import { VersionSchema } from './versions.js';
 import type { Version } from './versions.js';
-import { HUMAN_WORKER_ID, REPOSITORY_INIT_CAPABILITY, WorkerSchema } from './workers.js';
+import {
+  HUMAN_WORKER_ID,
+  REPOSITORY_CLONE_CAPABILITY,
+  REPOSITORY_INIT_CAPABILITY,
+  WorkerSchema,
+} from './workers.js';
 import type { Worker } from './workers.js';
 
 const timestamp = '2026-11-19T00:00:00.000Z';
@@ -105,6 +115,24 @@ export function makeRepositoryInitCommandFixture(
       kind: REPOSITORY_INIT_CAPABILITY,
       projectId: 'project:example',
       relativePath: 'project',
+    },
+    ...overrides,
+  });
+}
+
+export function makeRepositoryCloneCommandFixture(
+  overrides: Partial<RepositoryCloneCommand> = {},
+): RepositoryCloneCommand {
+  return RepositoryCloneCommandSchema.parse({
+    protocolVersion: PROTOCOL_VERSION,
+    messageId: 'message:dispatch',
+    type: 'command.dispatch',
+    commandId: 'operation:example',
+    payload: {
+      kind: REPOSITORY_CLONE_CAPABILITY,
+      projectId: 'project:example',
+      relativePath: 'project',
+      repository: 'team/project',
     },
     ...overrides,
   });
