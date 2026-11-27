@@ -93,7 +93,8 @@ Codex was not checked under the sandbox and is unverified.
 
 ### Manual checks with real GitHub: sign-in and setup
 
-Status: not yet run. The automated tests for sign-in and setup use a local stand-in for GitHub
+Status: run by the user on 2026-11-26 and 2026-11-27 with a personal App; the results are in the
+table after the steps. Steps 8 to 10 were not run. The automated tests for sign-in and setup use a local stand-in for GitHub
 and never reach github.com, so only these steps cover the real service. They need a GitHub
 account that may create Apps and one test repository. Steps 8 to 10 need a second GitHub
 account, and for them to work the App must be owned by an organization, created by choosing that
@@ -134,11 +135,29 @@ personal App, record "GitHub refused the account" as the outcome of step 8 and s
 13. Start again from a fresh database and App file. Create the App and install it, but do not
     sign in. Restart the API and read the owner code from its output. In a different browser,
     enter it on the setup page, then sign in. Expected: that browser becomes the owner. Without
-    the code, signing in from that browser is refused.
+    the code, signing in from that browser is refused. Open exactly <http://localhost:5173> in
+    that browser: at `http://127.0.0.1:5173`, the address Vite prints, the Board loads but the
+    API refuses the code with "This browser Origin is forbidden".
+
+The user ran the steps against github.com and reported the results; the coordinating agent
+recorded them and did not sign in or create the App itself.
+
+| Steps   | Result                                                                                                                                                                                                                                                                            |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 to 7  | Passed.                                                                                                                                                                                                                                                                           |
+| 8 to 10 | Not run: no second GitHub account was available.                                                                                                                                                                                                                                  |
+| 11      | Passed.                                                                                                                                                                                                                                                                           |
+| 12      | Passed: the earlier projects were all still there. Whether the setup page asked for the owner code that the API prints for reconnecting was not recorded.                                                                                                                         |
+| 13      | Passed at `http://localhost:5173`: the Board showed "The owner code was accepted. Now sign in with GitHub." The first tries, in Firefox and in a private Chrome window, were refused with "This browser Origin is forbidden" (see the note in step 13), before the code was read. |
+
+One observation is not a failure of these checks. A sign-in started before the API was ready
+came back as `?signin=failed&reason=state_invalid`, because pending sign-ins are kept in memory.
+Signing in again worked, but the Board keeps that query in the address afterwards.
 
 ### Manual checks with real GitHub: linking, cloning and credentials
 
-Status: not yet run. The automated tests for linking, cloning and credentials use a local
+Status: run by the user on 2026-11-26 and 2026-11-27; the results are in the table after the
+steps. Step 10 was not run. The automated tests for linking, cloning and credentials use a local
 stand-in for GitHub and a local stand-in Git server and never reach github.com, so only these
 steps cover the real service. Do the sign-in and setup checks above first: the App must exist,
 and you must be signed in as the owner. You need one private repository the App is installed on,
@@ -171,7 +190,8 @@ the App file's content.
    `repository_not_accessible` and no project appears.
 9. On GitHub, open the App's settings and its installation. Expected: the App has Contents (read
    and write), Pull requests (read and write) and Metadata (read) and nothing else; no
-   Workflows; no webhook; no events; the installation is limited to the repositories you
+   Workflows; no webhook; no events (GitHub may show no events section at all while the webhook
+   is inactive); the installation is limited to the repositories you
    chose. Atlas asks for each clone a token that is limited to one repository and to Contents
    read; GitHub does not show these tokens, so this part is covered by the stand-in tests, and
    the API log line (`Granted a repository credential`) shows the rights `contents:read`.
@@ -190,6 +210,27 @@ the App file's content.
     Expected: the worktree is created and the session starts. If the Board reports that creating
     the worktree took too long, the 30-second limit in `apps/worker/src/sessions/worktree.ts`
     needs raising; record the repository's size and the time it took.
+
+The user ran the steps against github.com with the Worker in its container and reported the
+results; the coordinating agent recorded them. The workspace was `/srv/atlas-acceptance/projects`
+on the WSL file system, not a Windows drive: the containerized Worker, which runs as user 1001,
+could not run `git init` in a workspace under `/mnt/c`. That defect is open.
+
+| Steps  | Result                                                                                                                                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1 to 3 | Passed.                                                                                                                                                                                                      |
+| 4      | Passed. GitHub refused to remove the only selected repository, as the step says.                                                                                                                             |
+| 5, 6   | Passed with a private repository. An empty repository cloned as an empty folder; its `HEAD` stayed `master`, not the repository's default branch.                                                            |
+| 7      | Passed.                                                                                                                                                                                                      |
+| 8      | Passed: "The GitHub App cannot reach that repository…" and no project. The message stayed after another repository was chosen; fixed afterwards and covered by a Board test, not checked again in a browser. |
+| 9      | Passed. The user found no events section on GitHub. The API log held three `Granted a repository credential` lines, each with the rights `contents:read`, and no token.                                      |
+| 10     | Not run: no second GitHub account was available.                                                                                                                                                             |
+| 11     | Passed: `pnpm dev` printed "worker stopped (0); stopping Atlas."; after the restart the project showed "Repository needs attention" and its folder held only `.git`.                                         |
+| 12     | Passed with a small repository on the WSL file system: the worktree was created and the session ran. Not run on a Windows drive or with a large repository, so the 30-second limit is untested there.        |
+
+The fix for repositories with thousands of branches (the default branch was looked for in a
+branch list cut at 64 KiB) was made after steps 5 to 7 and before steps 8 to 12. It is covered by
+a Worker test; no repository of that size was cloned from github.com.
 
 ## Review and test permissions
 
@@ -223,6 +264,20 @@ tests; the coordinating agent ran those. Not done from its minor findings: a siz
 copied objects, a forged-pack test in the suite, and showing a failed copy while the session
 still runs. The change was run with a real logged-in Claude in the re-check of 2026-11-25.
 
+The GitHub connection work (sign-in, setup, members, repository links and clones) was split
+into tasks, each implemented by one agent and reviewed by a separate reviewer agent, followed by
+an independent whole-branch review and one round of fixes. Three later commits (refusing a
+GitHub create while sign-in is off, the API test timeouts and the commit body line length) were
+self-reviewed when made. A second independent review of the whole branch then read them and the
+contracts, API and Worker code in full, and the Board and the tests in part; it ran no tests. It
+found no critical issue and one important one: the commit that added `apps/api/vitest.config.ts`
+did not record the user's approval, which is recorded below. Of its six minor findings, the
+branch-list limit was fixed, self-reviewed only. Open: pending sign-ins can be pushed out by
+another website's requests, a native Worker that crashes leaves its Git processes running, an
+unknown `/api/v1` path answers "sign in" instead of "not found" with sign-in on, and an App file
+that becomes unreadable while the API runs gives an unexplained error. The fix to the create
+dialog's refusal message was also self-reviewed only.
+
 Earlier work was reviewed by the
 implementing agent only; an independent agent review of it was attempted but unavailable
 because the service usage limit was reached.
@@ -235,6 +290,13 @@ The user explicitly approved these changes to existing tests and test helpers:
   and temporary state, and format the file.
 - Worker replay test: check that the temporary server has a TCP address before
   reading its port; preserve assertions and behavior.
+- Browser test server (`scripts/e2e-server.mjs`): start the API with `ATLAS_AUTH: 'off'`.
+- API tests: a 30-second test and hook timeout for every API test, in the new
+  `apps/api/vitest.config.ts`; the tests time out on this checkout's Windows drive otherwise.
+- `apps/api/tests/project-create-github-field.test.ts`: expect 409 `github_unavailable` for a
+  create with `githubRepositoryId` while sign-in is off, after the behavior changed.
+- Commit message check: no limit on the length of body lines, because two earlier commits on
+  the branch exceed it and past commit messages are not reworded.
 
 Other tests were added as new files. Mandatory TDD is not enabled. The root and
 per-app instructions preserve the requirement to ask before changing tests.
