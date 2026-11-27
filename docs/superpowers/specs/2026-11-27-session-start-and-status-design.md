@@ -1,6 +1,6 @@
 # Agent sessions: start on move, resume, trust and status
 
-Status: draft for the user's approval, 2026-11-27.
+Status: approved by the user, 2026-11-27, as revised that day after an independent review.
 
 ## Intent and scope
 
