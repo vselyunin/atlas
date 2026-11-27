@@ -278,6 +278,35 @@ results go here when they are. Do each step in both themes where it shows a dot.
       again and record what the cards and the task panel show once the Worker has reconnected and
       synced: the session as lost, or no dot with "Start session" offered for a task in Working.
 
+Checked on 2026-11-27 in the running Board without Claude: `pnpm dev` with separate data under
+`/tmp`, sign-in off and `bash` as the agent command (a custom agent: no trust record, no hooks, no
+prompt notice), the sandbox on, driven through the browser.
+
+| Check                                               | Result                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| A move to Done                                      | No session started.                                                                          |
+| A move into Working                                 | One sandbox and one agent process within about two seconds; blue dot on the card.            |
+| Task panel while running                            | Blue dot, "Working since …", "Connect". Connect showed the running terminal.                 |
+| Hide, then Connect again                            | Still one sandbox and one agent process.                                                     |
+| The agent exits (`exit`)                            | Grey dot, "Ended at … (exit code 0)", "Resume session".                                      |
+| Resume session                                      | One sandbox and one agent process again; blue dot; "Stop" offered.                           |
+| Move out of Working and back while the session runs | Still one sandbox and one agent process; the "since" time did not change.                    |
+| Dot colours                                         | Card and panel dots have the same colour in the dark theme; the card dot shows in the light. |
+
+Not checked there: the amber, green and red dots, Stop, the Worker going offline, and everything
+that needs Claude (the list above).
+
+Tests at the end of this work: 119 contract, 211 Worker (1 skipped), 229 API and 137 Board. On the
+Windows drive `pnpm check` did not finish green in three runs: lint, format check and typecheck
+passed, and each time one Board test file, a different one each run, did not start ("Timeout
+waiting for worker to respond"); those files pass when run alone. In a copy on the Linux file
+system lint, typecheck, build and the contract, API and Board tests passed; three Worker tests in
+`workspace-access.test.ts`, which this work does not touch, failed there because the copy lay
+under `/root`. The 8 Docker tests of this checkout passed when run alone
+(`pnpm exec vitest run tests/docker --exclude ".claude/**"`). Plain `pnpm test:docker` also picked
+up the copies of those tests in two other worktrees under `.claude/worktrees`, ran all three sets
+at once and had 8 of 24 time out.
+
 ## Review and test permissions
 
 The container and sandbox work was split into 11 tasks. Tasks 1 to 10 each had an independent
