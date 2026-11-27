@@ -174,6 +174,9 @@ export function CreateProjectDialog({
                     value={repositoryId}
                     onChange={(id, repositoryName) => {
                       setRepositoryId(id);
+                      // A refusal was about the previous choice. It stays while nothing is
+                      // chosen, as when the refused repository leaves the list.
+                      if (id !== null && id !== repositoryId) mutation.reset();
                       if (id !== null && repositoryName && !pathEdited)
                         setPath(folderFor(repositoryName));
                     }}
