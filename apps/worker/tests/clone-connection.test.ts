@@ -95,7 +95,12 @@ it('registers the clone capability and clones with a granted credential', async 
     await expect.poll(() => results().length, { timeout: 10_000 }).toBe(1);
     const register = messages.find((message) => message.type === 'worker.register');
     expect(register?.payload).toMatchObject({
-      capabilities: ['repository.init', 'agent.session', 'repository.clone'],
+      capabilities: [
+        'repository.init',
+        'agent.session',
+        'repository.clone',
+        'agent.session.status',
+      ],
     });
     expect(messages.map((message) => message.type)).toContain('command.accepted');
     expect(results()[0]?.payload).toEqual({

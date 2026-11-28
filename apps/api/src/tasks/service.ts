@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { Task, TaskCreate, TaskMove, TaskPatch } from '@atlas/contracts';
+import type { Task, TaskCreate, TaskMove, TaskPatch, TaskStatus } from '@atlas/contracts';
 import { and, asc, eq } from 'drizzle-orm';
 import type { ApiContext, DbTransaction } from '../db/client.js';
 import { taskFields, tasks, workers } from '../db/schema.js';
@@ -104,15 +104,17 @@ export function patchTask(
   );
 }
 
+// Returns the moved task with the column it left, so callers can react to a change of column.
 export function moveTask(
   context: ApiContext,
   taskId: string,
   { expectedRevision, status, beforeTaskId }: TaskMove,
-): Task {
+): { task: Task; previousStatus: TaskStatus } {
   return context.db.transaction(
     (tx) => {
       const task = requireCurrentTask(tx, taskId, expectedRevision);
-      if (beforeTaskId === task.id) return task;
+      const unchanged = { task, previousStatus: task.status };
+      if (beforeTaskId === task.id) return unchanged;
       const destination = readColumn(tx, task.projectId, task.versionId, status).filter(
         (row) => row.id !== task.id,
       );
@@ -126,7 +128,7 @@ export function moveTask(
           'invalid_anchor',
           'The destination task is no longer in that column',
         );
-      if (task.status === status && task.position === position) return task;
+      if (task.status === status && task.position === position) return unchanged;
 
       const now = context.now();
       const moved = updateTask(tx, task, { status, position }, now);
@@ -135,7 +137,7 @@ export function moveTask(
       if (status !== task.status) {
         compactColumn(tx, readColumn(tx, task.projectId, task.versionId, task.status), now);
       }
-      return moved;
+      return { task: moved, previousStatus: task.status };
     },
     { behavior: 'immediate' },
   );

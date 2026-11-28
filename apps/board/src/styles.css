@@ -17,6 +17,11 @@
   --status-todo: #7963a4;
   --status-working: #98701c;
   --status-done: #4f7957;
+  --status-agent-working: #356bc4;
+  --status-needs-input: #b36a00;
+  --status-finished: #2b8a3e;
+  --status-problem: #b3382c;
+  --status-ended: #6b6b6b;
   --chip-bg: #e8eaed;
   --chip-text: #4c5969;
   --epic-bg: #eee8f6;
@@ -51,6 +56,11 @@
   --status-todo: #b1a2d6;
   --status-working: #d2b376;
   --status-done: #89b893;
+  --status-agent-working: #8bb3ec;
+  --status-needs-input: #f0b84a;
+  --status-finished: #7fd08f;
+  --status-problem: #f0877b;
+  --status-ended: #9a9a9a;
   --chip-bg: #30343b;
   --chip-text: #c5cedc;
   --epic-bg: #382d46;
@@ -255,20 +265,56 @@ a {
   font-weight: 600;
   margin: 0;
 }
-.status-dot {
+.column-dot {
   height: 7px;
   width: 7px;
   border-radius: 50%;
-  background: var(--status-backlog);
+  background-color: var(--status-backlog);
 }
-.status-dot.todo {
-  background: var(--status-todo);
+.column-dot.todo {
+  background-color: var(--status-todo);
+}
+.column-dot.working {
+  background-color: var(--status-working);
+}
+.column-dot.done {
+  background-color: var(--status-done);
+}
+/* Agent session dot on a task card and in the task panel; separate from the column heading dots. */
+.status-dot {
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  background-color: var(--status-ended);
+}
+.status-dot.needs_input {
+  background-color: var(--status-needs-input);
+}
+.status-dot.finished {
+  background-color: var(--status-finished);
+}
+.status-dot.problem {
+  background-color: var(--status-problem);
+}
+.status-dot.ended {
+  background-color: var(--status-ended);
 }
 .status-dot.working {
-  background: var(--status-working);
+  background-color: var(--status-agent-working);
+  animation: status-pulse 1.6s ease-in-out infinite;
 }
-.status-dot.done {
-  background: var(--status-done);
+@keyframes status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .status-dot.working {
+    animation: none;
+  }
 }
 .count {
   font-size: 10px;
@@ -515,6 +561,24 @@ a {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+.session-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.session-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.session-summary .status-dot {
+  flex: none;
+  margin-right: 0;
 }
 .session-heading h3 {
   margin: 0;

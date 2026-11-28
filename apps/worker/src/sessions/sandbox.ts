@@ -57,6 +57,8 @@ export function sandboxSettings(input: {
   home: string;
   profile: AgentProfile;
   allowedDomains: string[];
+  // Further folders the agent may write, such as its status folder.
+  extraWritable?: string[];
 }): SandboxSettings {
   const { worktree, profile } = input;
   return {
@@ -74,6 +76,7 @@ export function sandboxSettings(input: {
         join(worktree.commonDir, 'refs', 'heads', 'atlas'),
         join(worktree.commonDir, 'logs'),
         ...profile.writablePaths(input.home),
+        ...(input.extraWritable ?? []),
       ],
       // These files decide which config and hooks Git uses in the worktree. An agent that could
       // rewrite them would get its own commands run by Git outside the sandbox.

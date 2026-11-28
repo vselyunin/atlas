@@ -6,6 +6,7 @@ import type { Task, TaskCreate, TaskChanges, Worker, Version, TaskStatus } from 
 import { Dialog } from '../../components/ui/dialog';
 import { request, errorMessage } from '../../lib/api';
 import { TaskSession } from '../sessions/TaskSession';
+import type { SessionMessage } from '../sessions/useTaskSession';
 import { TaskFields } from './TaskFields';
 
 export function TaskDetails({
@@ -34,6 +35,7 @@ export function TaskDetails({
   const editable = task.status === 'backlog' || task.status === 'todo';
   const [saved, setSaved] = useState(false);
   const client = useQueryClient();
+  const [session, setSession] = useState<SessionMessage | null>(null);
   const mutation = useMutation({
     mutationFn: () => {
       const changes: TaskChanges = editable
@@ -60,7 +62,7 @@ export function TaskDetails({
       description={`${task.id.slice(0, 8).toUpperCase()} · ${TASK_STATUS_LABELS[task.status]}`}
       onClose={onClose}
     >
-      <TaskSession taskId={task.id} />
+      <TaskSession taskId={task.id} taskStatus={task.status} onInfo={setSession} />
       <label className="status-field">
         Status
         <Select
@@ -104,6 +106,12 @@ export function TaskDetails({
             onVersionChange={setVersionId}
           />
         </fieldset>
+        {session && session.state !== 'none' && (
+          <p className="field-note">
+            The agent got the description when its session first started. Later edits do not reach
+            it.
+          </p>
+        )}
         <p className="field-note">Assignment records responsibility. It does not start work.</p>
         {mutation.error && (
           <p role="alert" className="error">

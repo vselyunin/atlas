@@ -14,16 +14,29 @@ import {
 import type { CollisionDetection, DragMoveEvent, DragEndEvent } from '@dnd-kit/core';
 import { Plus, UserRound, Bot } from 'lucide-react';
 import { TaskStatusSchema, TASK_STATUS_LABELS } from '@atlas/contracts';
-import type { Task, TaskStatus, Worker } from '@atlas/contracts';
+import type { SessionSummary, Task, TaskStatus, Worker } from '@atlas/contracts';
 import { label } from '../tasks/TaskFields';
+import { StatusDot, statusDescription } from '../sessions/status';
 import { isSamePosition, orderedTasks, targetAtPointer } from './dropTarget';
 import type { DropTarget } from './dropTarget';
 
-function TaskContents({ task, workers }: { task: Task; workers: Worker[] }) {
+type Sessions = ReadonlyMap<string, SessionSummary>;
+function TaskContents({
+  task,
+  workers,
+  session,
+}: {
+  task: Task;
+  workers: Worker[];
+  session?: SessionSummary;
+}) {
   const worker = workers.find((item) => item.id === task.assigneeId);
   return (
     <>
-      <span className="task-title">{task.title}</span>
+      <span className="task-title">
+        {session && <StatusDot summary={session} />}
+        {task.title}
+      </span>
       {task.description && <span className="card-description">{task.description}</span>}
       <span className="card-footer">
         <span
@@ -56,6 +69,7 @@ type CardProps = {
   onKeyboard: (event: KeyboardEvent<HTMLButtonElement>, task: Task) => void;
   suppressClick: RefObject<boolean>;
   instructions: string;
+  sessions?: Sessions;
 };
 function TaskCard({
   task,
@@ -66,11 +80,15 @@ function TaskCard({
   onKeyboard,
   suppressClick,
   instructions,
+  sessions,
 }: CardProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
     id: task.id,
     disabled,
   });
+  const session = sessions?.get(task.id);
+  const description = session ? statusDescription(session) : null;
+  const statusId = `${useId()}-status`;
   return (
     <article
       ref={setNodeRef}
@@ -85,7 +103,7 @@ function TaskCard({
         aria-label={task.title}
         aria-disabled={undefined}
         aria-pressed={isDragging || keyboardActive}
-        aria-describedby={instructions}
+        aria-describedby={description ? `${statusId} ${instructions}` : instructions}
         onMouseDown={(event) => {
           suppressClick.current = false;
           listeners?.onMouseDown?.(event);
@@ -103,8 +121,13 @@ function TaskCard({
           onOpen(task);
         }}
       >
-        <TaskContents task={task} workers={workers} />
+        <TaskContents task={task} workers={workers} session={session} />
       </button>
+      {description && (
+        <span id={statusId} className="sr-only">
+          {description}
+        </span>
+      )}
     </article>
   );
 }
@@ -148,7 +171,7 @@ function TaskColumn({
       className={`column ${isOver || destination ? 'drop-over' : ''}`}
     >
       <div className="column-heading">
-        <span className={`status-dot ${status}`} />
+        <span className={`column-dot ${status}`} />
         <h2>{TASK_STATUS_LABELS[status]}</h2>
         <span className="count">{tasks.length}</span>
         {(status === 'backlog' || status === 'todo') && (
@@ -196,6 +219,7 @@ export function BoardDnd({
   onCreate,
   onMove,
   disabled,
+  sessions,
 }: {
   tasks: Task[];
   workers: Worker[];
@@ -203,6 +227,7 @@ export function BoardDnd({
   onCreate: (status: 'backlog' | 'todo') => void;
   onMove: (task: Task, status: TaskStatus, before: string | null) => void;
   disabled: boolean;
+  sessions?: Sessions;
 }) {
   const board = useRef<HTMLDivElement>(null);
   const pointer = useRef<{ x: number; y: number } | null>(null);
@@ -373,13 +398,18 @@ export function BoardDnd({
               onKeyboard={onKeyboard}
               suppressClick={suppressClick}
               instructions={instructions}
+              sessions={sessions}
             />
           ))}
         </div>
         <DragOverlay dropAnimation={null}>
           {activeTask && !keyboardId && (
             <div className="task-card drag-preview" aria-hidden="true">
-              <TaskContents task={activeTask} workers={workers} />
+              <TaskContents
+                task={activeTask}
+                workers={workers}
+                session={sessions?.get(activeTask.id)}
+              />
             </div>
           )}
         </DragOverlay>

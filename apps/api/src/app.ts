@@ -102,7 +102,7 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
         this.websocketServer.close(done);
       },
     });
-    const sessions = new SessionHub(context, registry, sessionRecheckMs);
+    const sessions = new SessionHub(context, registry, sessionRecheckMs, app.log);
     app.addHook('onClose', (_app, done) => {
       sessions.close();
       done();
@@ -145,9 +145,15 @@ export async function buildApp(options: ApiOptions): Promise<FastifyInstance> {
     registerProjectRoutes(app, context, registry, broker, projectGithub);
     registerVersionRoutes(app, context);
     registerWorkerRoutes(app, context);
-    registerTaskRoutes(app, context);
+    registerTaskRoutes(app, context, sessions);
     registerOperationRoutes(app, context);
-    registerSessionRoutes(app, sessions, allowedOrigin, appFile ? authSessions : undefined);
+    registerSessionRoutes(
+      app,
+      context,
+      sessions,
+      allowedOrigin,
+      appFile ? authSessions : undefined,
+    );
     registerGateway(app, context, registry, workerToken, sessions, broker);
     // Fastify owns the error handlers; round-trip every expected HTTP error via the shared shape.
     app.addHook('preSerialization', (request, reply, payload, done) => {

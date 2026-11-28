@@ -5,6 +5,7 @@ export const HUMAN_WORKER_ID = 'human:vladi';
 export const REPOSITORY_INIT_CAPABILITY = 'repository.init';
 export const AGENT_SESSION_CAPABILITY = 'agent.session';
 export const REPOSITORY_CLONE_CAPABILITY = 'repository.clone';
+export const AGENT_SESSION_STATUS_CAPABILITY = 'agent.session.status';
 
 export const WorkerKindSchema = z.enum(['human', 'atlas']);
 export const WorkerAvailabilitySchema = z.enum(['online', 'offline', 'not_applicable']);

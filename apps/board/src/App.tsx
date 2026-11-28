@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Plus, Layers3 } from 'lucide-react';
 import type { Task, TaskStatus } from '@atlas/contracts';
 import { useAuthState } from './lib/auth';
 import { UserMenu } from './features/auth/UserMenu';
-import { useProjects, useVersions, useTasks, useWorkers } from './lib/queries';
+import { useProjects, useVersions, useTasks, useSessions, useWorkers } from './lib/queries';
 import { errorMessage } from './lib/api';
 import { BoardDnd } from './features/board/BoardDnd';
 import { useTaskMove } from './features/board/useTaskMove';
@@ -34,6 +34,12 @@ export function App() {
   const version =
     versions.data?.items.find((item) => item.id === versionId) ?? versions.data?.items[0];
   const tasks = useTasks(project?.id ?? '', version?.id ?? '', ready);
+  const sessionList = useSessions(project?.id ?? '', version?.id ?? '', ready);
+  const sessions = useMemo(
+    () =>
+      new Map((sessionList.data?.items ?? []).map(({ taskId, ...summary }) => [taskId, summary])),
+    [sessionList.data],
+  );
   const items = tasks.data?.items ?? [];
   const workerItems = workers.data?.items ?? [];
   const move = useTaskMove(project?.id ?? '', version?.id ?? '');
@@ -135,6 +141,7 @@ export function App() {
               onOpen={(task) => setSelectedId(task.id)}
               onCreate={createTask}
               onMove={onMove}
+              sessions={sessions}
               disabled={move.isPending || !version || tasks.isPending}
             />
           </>

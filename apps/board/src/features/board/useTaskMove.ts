@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { TaskResponseSchema } from '@atlas/contracts';
 import type { Task, TaskStatus, TaskListResponse } from '@atlas/contracts';
 import { request } from '../../lib/api';
-import { taskKey } from '../../lib/queries';
+import { sessionsKey, taskKey } from '../../lib/queries';
 
 export function useTaskMove(projectId: string, versionId: string) {
   const client = useQueryClient();
@@ -44,6 +44,10 @@ export function useTaskMove(projectId: string, versionId: string) {
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) client.setQueryData(key, context.previous);
+    },
+    // A move into Working can start a session; show its dot without waiting for the next poll.
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: sessionsKey(projectId, versionId) });
     },
     onSettled: () => client.invalidateQueries({ queryKey: key }),
   });

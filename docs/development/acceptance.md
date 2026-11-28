@@ -25,7 +25,7 @@ temporary data and separate ports, leaving the personal workspace untouched.
 At the time of writing `pnpm check` runs 60 contract, 111 Worker, 28 API and 41 Board
 tests, plus 10 integration tests. They cover, with a stand-in agent and the sandbox off:
 
-- session message schemas and limits, and the two accepted capability lists;
+- session message schemas and limits, and the accepted capability lists (four forms since session status);
 - Worker sessions and worktrees with real Git and a real PTY, the sandbox settings and
   agent arguments, required mode refusing to start without the sandbox, off mode running
   unwrapped, the Worker lock, the seccomp profile and the Worker configuration;
@@ -231,6 +231,81 @@ could not run `git init` in a workspace under `/mnt/c`. That defect is open.
 The fix for repositories with thousands of branches (the default branch was looked for in a
 branch list cut at 64 KiB) was made after steps 5 to 7 and before steps 8 to 12. It is covered by
 a Worker test; no repository of that size was cloned from github.com.
+
+### Session start, resume, trust and status
+
+Design: `docs/superpowers/specs/2026-11-27-session-start-and-status-design.md`. This part
+supersedes the statement above that the folder-trust question is asked again in every new session:
+the Worker now records the trust of a task worktree when the sandbox is on.
+
+Checks before building, run on 2026-11-27 with Claude Code 2.1.330 under `srt` in the Worker
+container, in a linked worktree:
+
+- Without a trust record the trust dialog appears and no hook runs. With
+  `projects["<worktree path>"].hasTrustDialogAccepted = true` written in place (same inode) the
+  dialog does not appear. The key is the worktree path.
+- Hooks passed with `--settings '<json>'` run under the sandbox. Observed order for a first run
+  with a prompt argument: `SessionStart` (`source: "startup"`), `UserPromptSubmit`, `Stop`. The
+  `Stop` input has `last_assistant_message`.
+- A question dialog fires `PreToolUse` (matcher `AskUserQuestion`), then `PermissionRequest`
+  (`tool_name: "AskUserQuestion"`); answering it fires `PostToolUse` (matcher `AskUserQuestion`).
+- `--session-id <uuid>` works; the conversation is saved as
+  `~/.claude/projects/<encoded cwd>/<uuid>.jsonl`. `--resume <uuid>` reopens it and fires
+  `SessionStart` with `source: "resume"` and nothing else until the user types.
+- `--resume` with an unknown ID prints "No conversation found with session ID: …" and exits with
+  code 1.
+- Not checked: `StopFailure`. No API error could be provoked, so the hook is wired from the
+  documentation and the red dot for a model API error is unverified.
+
+Manual checks with a real logged-in Claude, with `pnpm dev` and the user present. Not run yet; the
+results go here when they are. Do each step in both themes where it shows a dot.
+
+- [ ] Move a task from To do to Working. Expected: exactly one session starts, the card shows a
+      blue pulsing dot, and the task panel offers "Connect".
+- [ ] Open the terminal on the new worktree. Expected: Claude does not ask whether to trust the
+      folder, and the terminal shows "Atlas: first run, the task prompt was sent."
+- [ ] Ask the agent to put a question to you with a dialog. Expected: the dot turns amber while the
+      dialog is open and returns to blue when you answer.
+- [ ] Let the agent finish its turn. Expected: the dot turns green, and the task panel says the
+      agent finished and waits for your next message.
+- [ ] Press Stop. Expected: the dot turns grey and the session shows as ended, not as a failure.
+- [ ] Choose "Resume session". Expected: the terminal says the earlier conversation was resumed and
+      the prompt was not sent again, the agent remembers its work and does not repeat the task, and
+      the dot shows finished until you type.
+- [ ] Stop the Worker container (`docker stop atlas-worker`) with a session running. Expected: the
+      dot turns red and the task panel says the Worker is offline, unless `pnpm dev` stops the whole
+      stack first (see step 11 of the cloning checks), in which case record that. Start `pnpm dev`
+      again and record what the cards and the task panel show once the Worker has reconnected and
+      synced: the session as lost, or no dot with "Start session" offered for a task in Working.
+
+Checked on 2026-11-27 in the running Board without Claude: `pnpm dev` with separate data under
+`/tmp`, sign-in off and `bash` as the agent command (a custom agent: no trust record, no hooks, no
+prompt notice), the sandbox on, driven through the browser.
+
+| Check                                               | Result                                                                                       |
+| --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| A move to Done                                      | No session started.                                                                          |
+| A move into Working                                 | One sandbox and one agent process within about two seconds; blue dot on the card.            |
+| Task panel while running                            | Blue dot, "Working since …", "Connect". Connect showed the running terminal.                 |
+| Hide, then Connect again                            | Still one sandbox and one agent process.                                                     |
+| The agent exits (`exit`)                            | Grey dot, "Ended at … (exit code 0)", "Resume session".                                      |
+| Resume session                                      | One sandbox and one agent process again; blue dot; "Stop" offered.                           |
+| Move out of Working and back while the session runs | Still one sandbox and one agent process; the "since" time did not change.                    |
+| Dot colours                                         | Card and panel dots have the same colour in the dark theme; the card dot shows in the light. |
+
+Not checked there: the amber, green and red dots, Stop, the Worker going offline, and everything
+that needs Claude (the list above).
+
+Tests at the end of this work: 119 contract, 211 Worker (1 skipped), 229 API and 137 Board. On the
+Windows drive `pnpm check` did not finish green in three runs: lint, format check and typecheck
+passed, and each time one Board test file, a different one each run, did not start ("Timeout
+waiting for worker to respond"); those files pass when run alone. In a copy on the Linux file
+system lint, typecheck, build and the contract, API and Board tests passed; three Worker tests in
+`workspace-access.test.ts`, which this work does not touch, failed there because the copy lay
+under `/root`. The 8 Docker tests of this checkout passed when run alone
+(`pnpm exec vitest run tests/docker --exclude ".claude/**"`). Plain `pnpm test:docker` also picked
+up the copies of those tests in two other worktrees under `.claude/worktrees`, ran all three sets
+at once and had 8 of 24 time out.
 
 ## Review and test permissions
 

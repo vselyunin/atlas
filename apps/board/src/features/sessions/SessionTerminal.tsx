@@ -7,14 +7,20 @@ import {
   MAX_SESSION_INPUT_CHARS,
   taskSessionPath,
 } from '@atlas/contracts';
-import type { BoardToApiSessionMessage, SessionState } from '@atlas/contracts';
+import type { BoardToApiSessionMessage, SessionState, SessionSummary } from '@atlas/contracts';
+import { statusSentence } from './status';
 
-interface SessionInfo {
+interface SessionInfo extends SessionSummary {
   state: SessionState;
   branch: string | null;
   worktreePath: string | null;
-  exitCode: number | null;
-  message: string | null;
+}
+
+// The session's message in words: an API error kind or a refusal reads as its status sentence.
+function sessionNote(info: SessionInfo | null): string | null {
+  if (!info?.message?.trim()) return null;
+  if (info.reason === 'api_error' || info.reason === 'not_started') return statusSentence(info);
+  return info.message;
 }
 
 const STATE_LABELS: Readonly<Record<SessionState, string>> = {
@@ -39,7 +45,6 @@ function terminalTheme() {
 export default function SessionTerminal({ taskId }: { taskId: string }) {
   const container = useRef<HTMLDivElement>(null);
   const control = useRef<{ send(message: BoardToApiSessionMessage): void; size(): void }>(null);
-  const terminalRef = useRef<Terminal>(null);
   const [connected, setConnected] = useState(false);
   const [info, setInfo] = useState<SessionInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +62,6 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
     terminal.loadAddon(fit);
     terminal.open(element);
     fit.fit();
-    terminalRef.current = terminal;
 
     const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${scheme}://${window.location.host}${taskSessionPath(taskId)}`);
@@ -119,7 +123,6 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
       socket.close();
       terminal.dispose();
       control.current = null;
-      terminalRef.current = null;
     };
   }, [taskId]);
 
@@ -133,7 +136,7 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
           {state === 'exited' && info?.exitCode !== null && ` (exit code ${info?.exitCode})`}
           {info?.branch && ` · ${info.branch}`}
         </p>
-        {active ? (
+        {active && (
           <button
             type="button"
             className="button"
@@ -142,27 +145,12 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
           >
             Stop
           </button>
-        ) : (
-          <button
-            type="button"
-            className="button primary"
-            disabled={!connected}
-            onClick={() => {
-              const terminal = terminalRef.current;
-              if (!terminal) return;
-              setError(null);
-              control.current?.send({ type: 'start', cols: terminal.cols, rows: terminal.rows });
-              terminal.focus();
-            }}
-          >
-            {state === 'exited' ? 'Start again' : 'Start session'}
-          </button>
         )}
       </div>
       {info?.worktreePath && <p className="field-note">Worktree: {info.worktreePath}</p>}
-      {(error ?? info?.message) && (
+      {(error ?? sessionNote(info)) && (
         <p role="alert" className="error">
-          {error ?? info?.message}
+          {error ?? sessionNote(info)}
         </p>
       )}
       <div className="session-frame">
@@ -174,9 +162,7 @@ export default function SessionTerminal({ taskId }: { taskId: string }) {
           <p className="session-overlay">
             {!connected
               ? 'Not connected to the API. Hide and open the terminal to reconnect.'
-              : state === 'exited'
-                ? 'This session has ended. Choose Start again to run a new one.'
-                : 'No session is running. Choose Start session to launch the agent.'}
+              : 'This session is not running.'}
           </p>
         )}
       </div>

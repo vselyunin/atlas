@@ -44,6 +44,9 @@ const session = (
   worktreePath: null,
   exitCode: null,
   message: null,
+  status: 'none',
+  reason: 'none',
+  since: null,
   ...extra,
 });
 
@@ -90,20 +93,6 @@ describe('SessionTerminal', () => {
     expect(status()).toContain('Ended');
     expect(status()).toContain('(exit code 2)');
     expect(status()).toContain('· atlas/task-one');
-  });
-
-  it('offers Start session for none and Start again for exited, sending start with the size', async () => {
-    const user = userEvent.setup();
-    const socket = openSocket();
-    receive(socket, session('none'));
-    await user.click(screen.getByRole('button', { name: 'Start session' }));
-    expect(socket.sent).toContainEqual({ type: 'start', cols: 80, rows: 24 });
-
-    receive(socket, session('exited', { exitCode: 0 }));
-    expect(screen.queryByRole('button', { name: 'Start session' })).toBeNull();
-    socket.sent.length = 0;
-    await user.click(screen.getByRole('button', { name: 'Start again' }));
-    expect(socket.sent).toEqual([{ type: 'start', cols: 80, rows: 24 }]);
   });
 
   it.each(['starting', 'running'] as const)('offers Stop while %s', async (state) => {
