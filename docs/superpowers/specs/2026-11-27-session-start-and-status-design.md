@@ -406,6 +406,9 @@ independent review is run.
 
 - Next iteration (user's decision): a task in Working cannot be moved by hand
   and reaches Done when its pull request is merged.
+- Next iteration (user's decision, 2026-11-28): the green dot changes meaning
+  from "the agent ended its turn" to "the work is committed, pushed and has a
+  pull request". Until then green and amber stay as described above.
 - Claude cannot save `~/.claude.json` inside the sandbox, so whatever else it
   records there is lost between sessions.
 
